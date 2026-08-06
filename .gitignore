@@ -1,0 +1,5 @@
+# L'export est un ARTEFACT : il se télécharge, il ne se versionne pas.
+data/
+*.db
+*.db-wal
+*.db-shm
