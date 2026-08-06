@@ -165,7 +165,7 @@ présenter côte à côte sans l'expliquer à l'utilisateur.
 
 | | igiris (backend) | igiris-frontend (ce projet) |
 |---|---|---|
-| Où | `/opt/igiris` | `/opt/igiris-frontend` |
+| Où | `/opt/igiris` | `~/igiris-frontend` |
 | Rôle | catalogue, votes, dats, rapprochement, **génération de l'export** | consommation de l'export sur l'appareil |
 | Base | `votes.db`, ~200 Mo, en écriture | `games.db`, 6,8 Mo, **lecture seule** |
 | Dépôt | `gllmthebeast/igis` | à créer |
