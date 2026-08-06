@@ -181,31 +181,7 @@ et ne casse pas ce projet.
 
 ---
 
-## 7. L'application : igiris-scan
-
-`igiris_scan.py` — scanner en ligne de commande, **sans dépendance hors bibliothèque
-standard** (donc exécutable tel quel sur un Raspberry Pi) et **sans réseau**.
-
-```sh
-python3 igiris_scan.py /userdata/roms
-python3 igiris_scan.py ~/roms --system snes,megadrive --json rapport.json
-```
-
-Il répond à trois questions :
-
-1. **Qu'ai-je, et que l'appareil ne reconnaît pas ?** Identification par CRC pour les
-   consoles, par nom de romset pour l'arcade. Pour une archive, le CRC est lu dans
-   l'en-tête zip — aucune décompression, et c'est le CONTENU qui est identifié, pas
-   l'archive. Si le CRC direct échoue, il retente en sautant l'en-tête du format
-   (NES 16 o, Atari 7800 128 o, Lynx 64 o).
-2. **Ai-je des doublons ?** Le même jeu possédé sur plusieurs systèmes.
-3. **Ai-je la meilleure version ?** C'est le lien avec le vote : si la plateforme élue
-   par la communauté s'émule mieux que celle que tu possèdes, il te le dit.
-
-Il signale aussi les **fichiers rangés dans le mauvais dossier** — cause d'échec fréquente
-et facile à corriger.
-
-## 8. Outils fournis
+## 7. Outils fournis
 
 - `tools/fetch-export.sh` — télécharge l'export, **vérifie le sha256** contre le manifeste,
   ne remplace l'ancien qu'en cas de succès.
@@ -215,7 +191,7 @@ et facile à corriger.
 
 ---
 
-## 9. Conventions
+## 8. Conventions
 
 - **Aucune ROM, aucun hash de ROM dans ce dépôt** — même règle que le backend. Les hashes
   vivent dans l'export téléchargé, pas dans le code source.
