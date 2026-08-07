@@ -1,24 +1,45 @@
 # CLAUDE.md — igiris-frontend
 
 > Fichier de contexte lu automatiquement par Claude Code.
-> **Projet frontend embarqué** (Batocera / Raspberry Pi). Le backend est un projet SÉPARÉ :
-> `/opt/igiris` sur cette même VM, avec son propre `CLAUDE.md`.
+> **Frontend embarqué** (Batocera / Raspberry Pi en premier, mais pas uniquement — §1).
+> Le backend est un projet **SÉPARÉ** : `/opt/igiris` sur cette même VM, avec son propre
+> `CLAUDE.md`. Ce projet ne démarre vraiment qu'une fois l'export générable de bout en bout
+> — ce qui est le cas aujourd'hui (schéma 1.3.0, cf. `data/`).
 
 ---
 
 ## 0. Ce que fait ce projet, et ce qu'il ne fait pas
 
-L'appareil de l'utilisateur (typiquement un Raspberry Pi sous Batocera) contient des ROMs.
-Ce frontend doit lui dire **quel jeu il possède**, **sur quelle plateforme**, et **laquelle
-est la meilleure version** d'après les votes de la communauté.
+### L'objectif produit
 
-**Il fait exactement deux choses :**
+Remplacer l'écran d'accueil des distributions de rétrogaming par un frontend custom
+présentant **une liste unique de jeux, tous systèmes confondus**. L'appareil de
+l'utilisateur (typiquement un Raspberry Pi sous Batocera) contient des ROMs ; le frontend
+doit lui dire **quel jeu il possède**, **sur quelle plateforme**, et **laquelle est la
+meilleure version** d'après les votes de la communauté et les scores d'émulation.
+
+### Principes non négociables
+
+- **Pas de liste de systèmes à l'accueil.** L'entité de premier niveau est le **jeu**, pas
+  la plateforme.
+- **Tous les jeux du catalogue sont affichés, ROM présente ou non.** L'absence de ROM est
+  une *information affichée*, pas un filtre.
+- **Le moteur d'émulation n'est jamais modifié.** Aucun patch des cores, de RetroArch, ni
+  des scripts de lancement de la distribution hôte.
+- **Pas d'addons, pas de store.** Interface volontairement minimale.
+- **Multi-distribution dès le premier jour** (§1).
+
+### Le contrat de calcul
+
+Techniquement, l'appareil ne fait que deux choses :
+
 1. chercher un jeu par son nom ;
 2. retrouver un jeu depuis un fichier local (par CRC, ou par nom de romset pour l'arcade).
 
 **Il ne fait AUCUN rapprochement de titres.** Tout est précalculé côté serveur : la
-normalisation des noms, le rapprochement avec les dats, l'arbitrage des versions, les scores
-d'émulation. L'appareil ne fait que des *lookups* dans une table précalculée.
+normalisation des noms, le rapprochement avec les dats, l'arbitrage des versions, les
+scores d'émulation, la résolution région → langue. L'appareil ne fait que des *lookups*
+dans une table précalculée.
 
 > C'est la décision structurante du duo de projets. Rapprocher « Elder Scrolls V, The -
 > Skyrim » et « The Elder Scrolls V: Skyrim » demande une normalisation, des noms
@@ -26,7 +47,65 @@ d'émulation. L'appareil ne fait que des *lookups* dans une table précalculée.
 
 ---
 
-## 1. La ressource : l'export SQLite
+## 1. Contrainte de premier rang : compatibilité multi-OS
+
+### Le constat qui rend ça possible
+
+`es_systems.cfg` est une **convention EmulationStation**, pas une invention Batocera. Ce
+fichier décrit pour chaque système l'emplacement des ROMs et la **ligne de commande exacte**
+de lancement. Presque toute la famille des distributions de rétrogaming l'utilise. Ce qui
+change d'une distribution à l'autre, ce ne sont pas les concepts, ce sont **les chemins et
+la commande de lancement**.
+
+### Matrice de compatibilité
+
+| Distribution | Base | Statut |
+|---|---|---|
+| Batocera | Buildroot | Cible de référence |
+| Recalbox | Buildroot | Cible de validation (§13) |
+| RetroPie | surcouche Raspberry Pi OS | Supporté (lance via `runcommand.sh`) |
+| Retrobat | Windows, dérivé Batocera | Supporté |
+| EmuELEC | LibreELEC | Supporté |
+| Knulli | dérivé Batocera | Supporté |
+| ArkOS / ROCKNIX | Linux + ES | À vérifier au cas par cas |
+| ES-DE | format `es_systems.xml` | Adaptable, format proche |
+| Lakka | RetroArch seul, pas d'ES | **Hors périmètre** |
+| muOS | frontend propriétaire | **Hors périmètre** |
+
+Les deux exclusions ne sont pas des oublis : ces systèmes n'ont **aucune couche
+EmulationStation à remplacer**. Les supporter demanderait un pilote de lancement
+entièrement différent, ce qui ne se justifie qu'après validation du reste.
+
+### L'adaptateur de plateforme
+
+**Décision à appliquer avant la première ligne de code.** Tout ce qui est spécifique à une
+distribution est isolé derrière une interface unique, qui expose exactement quatre choses :
+
+1. localiser le fichier de description des systèmes ;
+2. résoudre une clé de plateforme du catalogue vers le nom de système local ;
+3. localiser les dossiers de ROMs ;
+4. lancer — construire et exécuter la commande, substitution de `%ROM%`.
+
+Rien d'autre. Tout le reste du code — chargement du catalogue, matching par hash, calcul
+des statuts, interface QML — **ne sait pas sur quelle distribution il tourne**.
+
+### Règles de contrôle
+
+- **Aucune chaîne littérale spécifique à une distribution en dehors de l'adaptateur.** Pas
+  de `/userdata/`, pas de `batocera`, pas de `emulatorlauncher.py` ailleurs. C'est
+  vérifiable par un simple `grep`, et **ça doit l'être en CI**.
+- **Ne jamais hardcoder le chemin du script de lancement.** On lit toujours la commande
+  dans le fichier de description des systèmes. C'est ce qui fait survivre l'application aux
+  changements de chemin du launcher (la version de Python embarquée a déjà changé plusieurs
+  fois chez Batocera), à l'ajout ou au retrait de systèmes, et aux changements d'options.
+- **Le fichier de description des systèmes est la source de vérité des systèmes présents**
+  → c'est lui qui décide du statut *noir* (§7).
+- **L'adaptateur déclare ses capacités.** Une distribution qui ne sait pas faire quelque
+  chose le dit ; l'interface s'adapte au lieu de planter.
+
+---
+
+## 2. La ressource : l'export SQLite
 
 Un **artefact de build**, régénéré côté serveur, que l'appareil télécharge et remplace d'un
 bloc. Il ne se modifie jamais sur l'appareil.
@@ -39,47 +118,60 @@ https://igiris.xyz/exports/manifest.json   version, sha256, horodatage
 ### Règles d'usage — non négociables
 
 **Ouverture en lecture seule immuable :**
+
 ```
 file:games.db?immutable=1     avec SQLITE_OPEN_READONLY | SQLITE_OPEN_URI
 ```
+
 `immutable=1` fait sauter tout le verrouillage à SQLite : c'est le plus rapide, et le seul
 mode qui fonctionne sur une partition montée en lecture seule.
 
 **Ne jamais passer l'export en WAL.** Il doit rester UN fichier, vérifiable par empreinte et
-remplaçable atomiquement. WAL crée des fichiers `-wal`/`-shm` annexes et exige un `-shm`
-inscriptible *même pour lire*. Le serveur livre volontairement en `journal_mode=DELETE`.
+remplaçable atomiquement. WAL crée des fichiers `-wal`/`-shm` annexes, exige un `-shm`
+inscriptible *même pour lire*, et n'apporte rien sans concurrence. Le serveur livre
+volontairement en `journal_mode=DELETE`.
 
 **Vérifier `schema_version` au chargement.** Il est dans `exp_meta` ET dans le manifeste.
-Refuser une version **MAJEURE** inconnue plutôt que de casser en silence ; les versions
-mineures sont additives et rétrocompatibles.
+Refuser une version **MAJEURE** inconnue, avec un message explicite, plutôt que de casser en
+silence ; les versions mineures sont additives et rétrocompatibles.
 
 **Vérifier le sha256** du fichier téléchargé contre le manifeste avant de remplacer
 l'ancien. Un export tronqué ne doit jamais devenir l'export courant.
 
 ---
 
-## 2. Le schéma (version 1.3.0)
+## 3. Le schéma **réellement livré** — version 1.3.0
+
+⚠️ Ceci est le schéma vérifié dans `data/games.db` au 2026-08-06. Pour ce qui est *demandé*
+au backend mais **pas encore livré** (`platform_key`, tables de langues), voir §9 — et ne
+pas coder contre ces champs avant qu'ils existent.
 
 ```sql
 exp_meta(key, value)
     -- schema_version, generated_at, games, platforms, rom_hashes, arcade_romsets, dat_sets
+    -- valeurs actuelles : 7 581 jeux · 18 555 plateformes · 71 006 hashes
+    --                     2 697 romsets arcade · 96 dats · 63 systèmes distincts
 
 exp_game(game_key, title, search_key, year, cover_ref, rating)
     -- game_key : identifiant stable, = title.id côté serveur (« igdb-3192 »)
     -- search_key : nom NORMALISÉ, à utiliser pour la recherche locale (jamais à afficher)
-    -- cover_ref : URL IGDB — voir la limite « hors ligne » plus bas
+    -- cover_ref : URL IGDB — voir la limite « hors ligne » en §10
     -- rating : note IGDB /100
 
 exp_game_platform(game_key, batocera_system, display_name, emu_score, is_preferred)
-    -- emu_score : fidélité 0..100 (voir §4)
+    -- PRIMARY KEY (game_key, display_name)
+    -- batocera_system : NULL = plateforme d'origine non émulée (pas une cible)
+    -- emu_score : fidélité 0..100 (voir §5)
     -- is_preferred : plateforme élue par les votes de la communauté
 
 exp_rom_hash(crc32, batocera_system, game_key, header_skip)
-    -- LA table interrogée à chaud. C'est un lookup, pas une recherche.
-    -- header_skip : octets d'en-tête à IGNORER avant de calculer le CRC (voir §3)
+    -- PRIMARY KEY (crc32, batocera_system) — LA table interrogée à chaud.
+    -- C'est un lookup, pas une recherche.
+    -- header_skip : octets d'en-tête à IGNORER avant de calculer le CRC (voir §4)
 
 exp_romset(romset, batocera_system, game_key, emulators, hardware, driver_status)
-    -- ARCADE uniquement, identification par NOM DE FICHIER (voir §3)
+    -- PRIMARY KEY (romset, batocera_system)
+    -- ARCADE uniquement, identification par NOM DE FICHIER (voir §4)
 ```
 
 ### Requêtes types
@@ -104,32 +196,58 @@ SELECT display_name, batocera_system, emu_score, is_preferred
 FROM exp_game_platform WHERE game_key = ? ORDER BY is_preferred DESC, emu_score DESC;
 ```
 
+`tools/probe.py` exécute exactement ces quatre requêtes : c'est la preuve que le contrat
+est respecté, à lancer avant toute autre chose.
+
 ---
 
-## 3. Deux voies d'identification, et pourquoi
+## 4. Identification des ROMs locales
 
-**Consoles → par CRC.** Le fichier est hashé, on cherche dans `exp_rom_hash`.
+### Deux voies, et pourquoi
 
-⚠️ **`header_skip`** : les dats No-Intro de la NES, l'Atari 7800 et la Lynx portent
-l'en-tête du format (16 o iNES, 128 o A78, 64 o LNX). Si le fichier local n'en a pas, il
-faut en tenir compte avant de hasher — sinon tout tombe en rouge à tort.
+**Consoles → par CRC32.** Le fichier est hashé, on cherche dans `exp_rom_hash`.
 
-**Arcade → par NOM DE ROMSET**, jamais par CRC. Le CRC d'un `.zip` d'arcade change dès qu'on
-reconstruit le romset (merged / split / non-merged), ce que font couramment les utilisateurs
-de MAME. Constaté dans les données du backend : `crusnexod.zip` porte deux CRC différents
-selon la source. Le **nom** (`sf2ce`, `mslug3`) est stable, et c'est sous ce nom que Batocera
-range les jeux d'arcade.
+**Arcade → par NOM DE ROMSET**, jamais par CRC. Le CRC d'un `.zip` d'arcade change dès
+qu'on reconstruit le romset (merged / split / non-merged), ce que font couramment les
+utilisateurs de MAME. Constaté dans les données du backend : `crusnexod.zip` porte deux CRC
+différents selon la source. Le **nom** (`sf2ce`, `mslug3`) est stable, et c'est sous ce nom
+que Batocera range les jeux d'arcade.
 
 `exp_romset` porte en plus :
-- `hardware` — le matériel réel (`neo`, `cps2`, `naomi`…), qu'IGDB ne connaît pas : il n'a
-  qu'une plateforme « Arcade » globale. Reconstruit depuis les drivers MAME.
+
+- `hardware` — le matériel réel (`neogeo`, `cps2`, `naomi`…), qu'IGDB ne connaît pas : il
+  n'a qu'une plateforme « Arcade » globale. Reconstruit depuis les drivers MAME.
 - `emulators` — quels émulateurs savent le lancer (`mame`, `fbneo`, `fbneo,mame`). Utile
   pour savoir dans quel dossier Batocera le ranger.
 - `driver_status` — `good` | `imperfect` | `protection` | `preliminary`.
 
+### Pièges du scan local
+
+**En-têtes de ROM.** Les dats No-Intro sont *sans* en-tête, alors que les ROMs en
+circulation en ont souvent un. Hasher le fichier brut fait **tout tomber en rouge à tort**.
+`header_skip` dit combien d'octets ignorer. Valeurs réellement présentes dans l'export :
+
+| Système | `header_skip` | Format |
+|---|---|---|
+| `nes` | 16 | iNES |
+| `atari7800` | 128 | A78 |
+| `lynx` | 64 | LNX |
+
+> ⚠️ **Le cas SNES n'est PAS couvert par `header_skip`** (il vaut 0 pour `snes`), alors que
+> le header de copieur SMC de **512 octets** circule largement. À traiter côté appareil —
+> l'heuristique usuelle est `taille_fichier % 1024 == 512` → ignorer les 512 premiers
+> octets et réessayer le lookup — ou à demander au backend (§9). Ne pas supposer que
+> `header_skip = 0` veut dire « fichier propre ».
+
+**Archives.** Beaucoup de ROMs sont zippées : **hasher le contenu, pas le zip.** (Sauf
+arcade, qui ne se hashe pas du tout — voir plus haut.)
+
+**Coût.** Le scan doit être **incrémental** : pas de rehash complet à chaque démarrage.
+Cache indexé par chemin + taille + date de modification.
+
 ---
 
-## 4. Comment lire `emu_score`
+## 5. Comment lire `emu_score`
 
 C'est un **% de fidélité du rendu par rapport à la version d'origine sur matériel réel**,
 avec le meilleur émulateur existant, **sans tenir compte de la puissance de l'hôte**.
@@ -140,60 +258,421 @@ score = plafond_de_la_plateforme × jouabilité × (1 − pénalités de fidéli
 
 Conséquence à comprendre : un jeu PS3 parfaitement jouable plafonne à **42**, parce que le
 meilleur émulateur PS3 n'atteint que ~42 % de fidélité. Un jeu SNES parfait fait **95**.
-**Ce n'est donc pas une note de qualité du jeu** — c'est une note d'émulation. Ne pas les
-présenter côte à côte sans l'expliquer à l'utilisateur.
+**Ce n'est donc pas une note de qualité du jeu** — c'est une note d'émulation. Ne jamais la
+présenter à côté de `rating` (note IGDB /100) sans l'expliquer à l'utilisateur.
 
 ---
 
-## 5. Limites connues, à ne pas découvrir en route
+## 6. Écran d'accueil
 
-- **Les jaquettes sont des URL IGDB** (`cover_ref`), donc **le réseau est nécessaire pour les
-  images**. Pour un vrai fonctionnement hors ligne, il faudra un pack d'images — le backend
-  peut le produire, c'est à demander.
-- **~17 % des jeux éligibles ne sont pas encore rattachés** à un dump. Le contenu s'enrichit
+Liste de jeux + recherche. Rien d'autre.
+
+### Composition d'une ligne
+
+| Élément | Rôle |
+|---|---|
+| Jaquette (vignette) | identification visuelle |
+| Titre | canonique, issu du catalogue |
+| Badges de langue | voir §8 |
+
+**Pas d'indicateur de système en vue liste** : le détail par plateforme est l'affaire de la
+fiche de jeu (§7). La liste reste dense et lisible à distance, sur un écran de télévision.
+
+### Filtres
+
+| Filtre | Nature | Résolution |
+|---|---|---|
+| Langue — existe au catalogue | statique | index de l'export |
+| Langue — possédée | dynamique | export × index local |
+| Plateforme | statique | index de l'export |
+| Possédé / manquant | dynamique | index local |
+| Année, arcade | statique | index de l'export |
+
+La distinction statique / dynamique n'est pas cosmétique : un filtre **statique** est un
+index précalculé par igiris, un filtre **dynamique** impose un croisement avec le résultat
+du scan local.
+
+Les filtres sont combinables, et la combinaison doit rester **interactive à la manette** —
+pas de temps d'attente perceptible entre l'appui et le résultat.
+
+---
+
+## 7. Fiche de jeu
+
+Jaquette, métadonnées, et la liste des systèmes sur lesquels le jeu existe, avec icône et
+code couleur :
+
+| Couleur | Signification |
+|---|---|
+| **Vert** | Système présent sur cette installation **et** ROM présente localement |
+| **Rouge** | Système présent, ROM absente |
+| **Noir** | Système absent de cette installation |
+
+Le statut *noir* est décidé par le fichier de description des systèmes, pas par le
+catalogue (§1).
+
+Le lancement se fait depuis cette fiche, sur un système **en vert**. Le système marqué
+`is_preferred` dans l'export est proposé par défaut ; les autres sont en options
+secondaires.
+
+C'est également ici — et pas en vue liste — qu'on détaille **quelle release apporte quelles
+langues** : chaque entrée de système porte ses propres badges, avec la même sémantique
+illuminé/grisé que §8 mais restreinte à cette plateforme.
+
+---
+
+## 8. Badges de langue
+
+> ⚠️ **Dépend de données qui n'existent pas encore dans l'export 1.3.0.** Voir §9. Cette
+> section est la spécification cible ; l'étape 6 de l'ordre de travail (§14) est bloquée
+> tant que le backend n'a pas livré.
+
+### Sémantique — deux états, un seul axe
+
+| État | Signification |
+|---|---|
+| **Illuminé** | Au moins une ROM présente localement fournit cette langue |
+| **Grisé** | La langue existe pour ce jeu au catalogue, mais aucune ROM possédée ne la fournit |
+
+Une langue qui n'existe dans **aucune** release du jeu n'est pas affichée du tout — ni
+grisée, ni illuminée. **Il n'y a pas de troisième état.**
+
+Cette sémantique est volontairement alignée sur le code couleur des systèmes (§7) :
+illuminé ≈ vert (possédé), grisé ≈ rouge (existe, pas possédé), absent ≈ le sujet ne se
+pose pas.
+
+### Portée : le jeu, pas la ROM
+
+La ligne de liste représente **un jeu**, qui couvre N plateformes et M ROMs. Les badges
+affichés sont donc **l'union des langues de toutes les releases** du jeu, et l'état
+illuminé/grisé est calculé sur **l'union des ROMs possédées, tous systèmes confondus**. Le
+détail « quelle ROM sur quelle plateforme apporte quelle langue » appartient à la fiche
+(§7).
+
+### Ce qu'il faut savoir avant d'implémenter
+
+**Une langue n'est pas un pays.** C'est le piège principal de cette fonctionnalité.
+L'anglais n'a pas de drapeau évident (Royaume-Uni ? États-Unis ?), l'espagnol non plus
+(Espagne ? Mexique ?), l'arabe encore moins.
+→ **Décision : les icônes sont des badges de code langue ISO 639-1** (EN, FR, DE, ES, IT,
+JA…), stylisés — **pas des drapeaux nationaux**. Le mot « drapeau » reste employé dans
+l'équipe par commodité, mais l'asset est un badge de langue. Ça évite une classe entière de
+bugs de représentation et reste lisible à distance.
+
+**Langue ≠ région.** Une ROM `(Europe)` n'est pas « en européen » : elle porte souvent
+`(En,Fr,De,Es,It)`. Inversement une ROM `(Japan)` sans balise de langue est implicitement
+japonaise. La donnée vient de la balise de langues du dat, avec repli sur une table région
+→ langue implicite. **Cette résolution se fait côté igiris, jamais sur l'appareil.**
+
+**Volume d'affichage.** Certains jeux dépassent dix langues. La ligne de liste en affiche un
+nombre **borné** — ordre : langues possédées d'abord, puis langue de l'interface, puis ordre
+stable du catalogue — avec un indicateur `+N` pour le reste.
+
+### La langue comme filtre
+
+Le badge et le filtre sont **la même règle appliquée à deux échelles** : ce qui illumine un
+badge est exactement ce qui fait passer un jeu à travers le filtre « possédé dans cette
+langue ». Une seule implémentation, deux points d'appel.
+
+Deux filtres distincts, à ne pas confondre dans l'interface :
+
+- **« Existe en français »** — le jeu a une release francophone au catalogue, possédée ou
+  non. *Statique*, index de l'export. Sert la découverte.
+- **« Jouable en français »** — une ROM possédée fournit le français. *Dynamique*,
+  croisement avec l'index local de hashes. **C'est celui qui a une valeur d'usage réelle.**
+
+Les deux doivent être proposés, avec des libellés sans ambiguïté.
+
+**Combinaison multi-langues** : passer par `exp_game.lang_mask` et un ET binaire, **pas**
+par une jointure répétée sur `exp_game_language`. Le masque est fourni précisément pour ça.
+
+**Règle de bit** : chaque langue occupe une position de bit fixe, attribuée **à vie** par
+igiris. Le frontend ne déduit **jamais** une position depuis l'ordre alphabétique ou
+l'ordre d'affichage : il lit `exp_language.bit_index`. Un décalage sur ce point produit des
+badges faux, **silencieusement**.
+
+### Contrainte de rendu
+
+Sur Raspberry Pi, une liste qui défile avec N badges par ligne est un piège à performance.
+
+- Badges servis depuis **un atlas de sprites unique**, pas N fichiers image individuels.
+- L'état grisé est obtenu par **shader ou opacité sur le même sprite**, jamais par un second
+  jeu d'assets.
+- Le nombre de badges par ligne est **borné et connu à la génération de l'export**, pour
+  éviter tout calcul de layout variable pendant le défilement.
+
+### Règle d'illumination, dans son intégralité
+
+> Une langue est **illuminée** si au moins un `crc32` de `exp_game_language` pour ce
+> `(game_key, lang_code)` figure dans l'index local de hashes ; sinon **grisée**.
+
+Il n'y a rien d'autre à calculer. Pas de parsing, pas de normalisation, pas de
+correspondance région → langue : tout est résolu en amont.
+
+---
+
+## 9. Écarts entre le contrat livré et le contrat cible
+
+**Section la plus importante de ce fichier.** Deux évolutions sont *spécifiées* mais **pas
+livrées**. Ne pas coder contre elles ; les demander explicitement au backend.
+
+### 9.1 — `batocera_system` → `platform_key` (rupture **MAJEURE**, 2.0.0)
+
+Le catalogue doit être **agnostique de la distribution** : l'export ne devrait contenir
+aucune colonne nommée d'après un système Batocera. Il devrait porter une `platform_key`
+neutre, l'adaptateur résolvant `platform_key` → nom de système local au démarrage, en
+lisant le fichier de description.
+
+**État réel : les trois tables portent `batocera_system`.** Deux choses à savoir :
+
+- La valeur est en pratique **déjà quasi neutre** : `batocera_system` vaut pour toute la
+  famille EmulationStation (Batocera, Recalbox, RetroPie, RetroBat), qui partage l'essentiel
+  des noms de dossiers (`megadrive`, `snes`, `psx`…). **Le nom de la colonne est historique,
+  la portée est plus large.**
+- Donc l'écart est un **problème de nommage et de discipline**, pas de sémantique. Il n'y a
+  pas d'urgence fonctionnelle, mais il y a une urgence de conception : si le code lit
+  `batocera_system` partout, la règle « aucune chaîne Batocera hors adaptateur » (§1) est
+  morte avant d'être née.
+
+**Décision d'attente** : le **chargeur de catalogue est le seul endroit** autorisé à
+connaître le nom `batocera_system`. Il expose `platform_key` au reste du code, dès
+maintenant. Le renommage côté backend deviendra alors un changement d'une ligne.
+
+### 9.2 — Tables de langues (ajout **MINEUR**, 1.4.0)
+
+Rien de tout ceci n'existe dans l'export 1.3.0 :
+
+| Objet demandé | Contenu |
+|---|---|
+| `exp_language` | référentiel : code, libellé, asset de badge, **`bit_index`** |
+| `exp_game_language` | `(game_key, lang_code, platform_key, crc32)` — quelle ROM fournit quelle langue |
+| `exp_game.lang_mask` | masque de bits des langues existant au catalogue pour ce jeu |
+
+C'est **additif** → version mineure → ne casse pas ce projet. À demander avant d'attaquer
+l'étape 6 du plan de travail.
+
+### 9.3 — Header SNES
+
+`header_skip` ne couvre pas le header de copieur SMC (512 o). Soit l'appareil applique
+l'heuristique `taille % 1024 == 512` (§4), soit le backend indexe les deux CRC. **À
+trancher** — l'heuristique locale est moins chère et n'attend personne.
+
+### Comment demander une évolution
+
+Toute évolution du contrat est une modification du **générateur d'export**, côté backend :
+`/opt/igiris/scripts/build-export.py` (`SCHEMA_VERSION` y est en dur, ligne 40). Additif →
+**mineure**. Renommage/suppression → **majeure**, et `tools/probe.py` doit refuser de
+charger (`SUPPORTED_MAJOR`).
+
+---
+
+## 10. Ce que fait l'appareil, et surtout ce qu'il ne fait JAMAIS
+
+### Ce qu'il fait
+
+- résolution `platform_key` → système local, via l'adaptateur ;
+- calcul de CRC32 des fichiers ROM locaux (incrémental, avec cache) ;
+- lookup dans `exp_rom_hash` / `exp_romset` (et `exp_game_language` quand il existera) ;
+- application des filtres : statiques par index, dynamiques par croisement avec l'index
+  local ;
+- rendu de l'interface.
+
+C'est tout. **Déterministe, rapide, hors ligne.**
+
+### Ce qu'il ne fait jamais
+
+- matching de titres, fuzzy, normalisation → **serveur uniquement** ;
+- résolution région → langue, normalisation ISO des langues → **serveur uniquement** ;
+- requête réseau pour afficher une fiche ou un badge (exception connue : les jaquettes,
+  §11) ;
+- écriture dans une base, quelle qu'elle soit.
+
+---
+
+## 11. Limites connues, à ne pas découvrir en route
+
+- **Les jaquettes sont des URL IGDB** (`cover_ref`), donc **le réseau est nécessaire pour
+  les images**. C'est la seule entorse au « hors ligne ». Pour un vrai fonctionnement
+  déconnecté, il faudra un **pack d'images** — le backend peut le produire, c'est à
+  demander (§9).
+- **~17 % des jeux éligibles ne sont pas encore rattachés à un dump.** Le contenu s'enrichit
   à chaque passage mensuel ; **la structure, elle, ne bouge pas**.
-- **`batocera_system` vaut pour toute la famille EmulationStation** (Batocera, Recalbox,
-  RetroPie, RetroBat) : ils partagent l'essentiel des noms de dossiers (`megadrive`, `snes`,
-  `psx`…). Le nom de la colonne est historique, la portée est plus large.
 - **Les CRC ambigus sont volontairement absents.** Un même CRC peut désigner plusieurs jeux
   (pistes audio de CD identiques). Les indexer rendrait la recherche trompeuse : seuls les
-  CRC désignant un seul jeu sont exportés.
+  CRC désignant un seul jeu sont exportés. Conséquence : un fichier légitime peut ne rien
+  matcher — c'est *attendu*, pas un bug à corriger sur l'appareil.
+- `exp_game_platform.batocera_system` peut être **NULL** : plateforme d'origine non émulée.
+  Ces lignes existent pour l'affichage (le jeu est sorti sur cette machine), pas pour le
+  lancement. Ne pas les traiter comme des cibles.
 
 ---
 
-## 6. Rapport avec le projet backend
+## 12. Architecture et stack
+
+### Ne PAS forker EmulationStation
+
+`batocera-emulationstation` est en C++/SDL. Le forker imposerait un rebase à chaque release
+et lierait le projet à une seule distribution — ce qui contredit §1. **Interdit dans ce
+projet.**
+
+Le frontend est une **application autonome**, packagée à part, qui est lancée au démarrage à
+la place d'EmulationStation, affiche sa propre interface, et passe par l'adaptateur pour
+lancer un jeu.
+
+### Qt6 + QML
+
+Trois contraintes déterminent ce choix :
+
+1. **Pilotage à la manette, pas à la souris.** Élimine tout ce qui suppose un curseur ; met
+   la navigation par focus au centre.
+2. **Buildroot.** Plusieurs distributions cibles sont construites avec Buildroot : tout
+   runtime ajouté doit être **cross-compilable vers ARM et x86_64**. C'est là que la plupart
+   des options meurent.
+3. **Matériel cible contraint.** Sur Raspberry Pi, ~1–2 Go de RAM utilisable et un GPU
+   faible, **pendant que les émulateurs tournent**.
+
+Qt est aussi le seul choix qui satisfait §1 sans effort : la même application tourne sous
+Linux embarqué, Linux de bureau et **Windows** — ce dernier point étant nécessaire pour
+Retrobat.
+
+**Répartition :**
+
+- **C++** : chargement de l'export, adaptateurs de plateforme, scan des ROMs, exécution du
+  lancement.
+- **QML** : toute l'interface — liste, recherche, badges, fiche, pastilles de statut.
+  `GridView` / `ListView` gèrent nativement la navigation par focus.
+
+Concrètement, **très peu de C++** : la couche qui expose les données à QML, plus les
+adaptateurs.
+
+### Pourquoi pas .NET malgré l'expérience C# disponible
+
+Faire entrer un runtime .NET dans une image Buildroot cross-compilée ARM, pour un produit
+distribué sur plusieurs OS hôtes, est un chantier permanent. Le coût dépasse le gain. En
+revanche, les **outils côté serveur** (import IGDB, génération d'export) peuvent
+parfaitement rester en C# — ils ne tournent pas sur l'appareil.
+
+### Références à étudier
+
+- **Pegasus Frontend** — natif C++/Qt cross-platform, orienté embarqué, navigation 100 %
+  manette, tourne sur Raspberry Pi et Odroid. À utiliser comme **référence d'architecture**
+  (pont C++/QML, gestion manette), **pas comme base à forker** : GPLv3 (copyleft,
+  contraignant pour une distribution commerciale) et il liste **les jeux possédés**, en
+  désaccord de fond avec l'affichage rouge/noir.
+- **RomM** — gestionnaire de collection auto-hébergé, AGPL-3.0, exports ES-DE et Pegasus,
+  API REST, écosystème d'applications compagnons. Structurellement, ces compagnons jouent
+  vis-à-vis de RomM le rôle que ce frontend joue vis-à-vis d'igiris. **Bon modèle de
+  découpage serveur / client.**
+- **romman** (ryanm101) — matching par hash d'abord (SHA1 puis CRC32), DAT comme source de
+  vérité, identification des jeux manquants, règles déterministes de sélection de la
+  meilleure release. Très proche du backend igiris : **à lire avant d'écrire les règles de
+  préférence de version.**
+
+---
+
+## 13. Rapport avec le projet backend
 
 | | igiris (backend) | igiris-frontend (ce projet) |
 |---|---|---|
 | Où | `/opt/igiris` | `~/igiris-frontend` |
 | Rôle | catalogue, votes, dats, rapprochement, **génération de l'export** | consommation de l'export sur l'appareil |
 | Base | `votes.db`, ~200 Mo, en écriture | `games.db`, 6,8 Mo, **lecture seule** |
-| Dépôt | `gllmthebeast/igis` | à créer |
+| Dépôt | `gllmthebeast/igis` | *(à renseigner — dépôt créé, remote non configuré)* |
 
 **Ne jamais écrire dans la base du backend depuis ce projet.** Elle est en
 `journal_mode=delete` : un écrivain bloque tous les lecteurs, et le site de vote est servi
 en production depuis cette même base.
 
-**Pour demander une évolution du contrat** (nouveau champ, pack d'images, autre filtrage) :
-c'est une modification du **générateur d'export**, côté backend —
-`/opt/igiris/scripts/build-export.py`. Toute évolution additive passe en version **mineure**
-et ne casse pas ce projet.
-
 ---
 
-## 7. Outils fournis
+## 14. Outils fournis
 
 - `tools/fetch-export.sh` — télécharge l'export, **vérifie le sha256** contre le manifeste,
-  ne remplace l'ancien qu'en cas de succès.
+  ne remplace l'ancien qu'en cas de succès (téléchargement à côté, bascule par un seul
+  `mv`). Ne fait rien si le fichier local est déjà le bon. Base surchargeable par
+  `IGIRIS_EXPORT_BASE`.
 - `tools/probe.py` — preuve de bout en bout : ouvre l'export en immuable, contrôle la
-  version de schéma, et exécute les quatre requêtes types. À lancer en premier pour
-  vérifier que le contrat est respecté.
+  version de schéma contre `SUPPORTED_MAJOR`, et exécute les quatre requêtes types (§3).
+  **À lancer en premier**, et après chaque mise à jour de l'export.
 
 ---
 
-## 8. Conventions
+## 15. Environnement de développement et conventions
 
+- **VM Ubuntu** — développement et build. **Claude Code** — outil de travail principal.
+- Le **matériel cible est distinct de la VM** : prévoir un cycle build → déploiement → test
+  qui ne suppose pas de développer sur la machine d'émulation.
+- Des **clones en lecture seule des distributions cibles**, hors du dépôt projet, servent de
+  référence (vrais fichiers de description des systèmes, structure des paquets, scripts de
+  lancement).
+
+**Conventions :**
+
+- **Versionnement SemVer strict** sur tous les livrables. *Priorité absolue.*
+- Itérations livrées sous forme d'**archives zip**.
+- **Erreurs remontées verbatim** : messages complets et lisibles, jamais avalés ni
+  reformulés par le code.
 - **Aucune ROM, aucun hash de ROM dans ce dépôt** — même règle que le backend. Les hashes
   vivent dans l'export téléchargé, pas dans le code source.
 - **Pas de secrets dans le code.**
-- L'export est un **artefact** : ne jamais le versionner dans git.
+- **L'export est un artefact** : jamais versionné (`data/` est dans `.gitignore`).
+
+---
+
+## 16. Stratégie Git et licences
+
+**Phase 1 — ce dépôt, aucun fork.** Code neuf, dépôt neuf. Le frontend n'est une
+modification d'aucune distribution ; c'est une application qui s'y branche.
+
+**Phase 2 — un fork par distribution empaquetée.** Utile uniquement pour l'intégration
+système. Chaque fork reste le plus mince possible :
+
+- un paquet pointant vers ce dépôt ;
+- la modification du service de démarrage pour lancer le frontend au lieu d'ES ;
+- **rien d'autre.**
+
+Plus le diff avec l'upstream est petit, moins le rebase coûte cher — et plus il est réaliste
+de maintenir plusieurs cibles en parallèle. **C'est le critère de conception de ces forks.**
+
+**Licences — à trancher avant toute diffusion.** Chaque distribution hôte embarque des
+centaines de projets tiers aux licences hétérogènes (GPL, LGPL, BSD, MIT, et clauses
+explicitement **non commerciales**, notamment sur des cores libretro). Une image
+pré-installée **ne peut pas être vendue en l'état**. Un audit licence par licence est un
+prérequis à toute distribution, a fortiori commerciale, et il est **à refaire pour chaque
+distribution hôte**. Les assets de badges de langue suivent la même règle : n'embarquer que
+des icônes redistribuables commercialement, ou les produire en propre.
+
+---
+
+## 17. Ordre de travail
+
+1. Interface d'adaptateur de plateforme + implémentation Batocera.
+2. Parser du fichier de description des systèmes → systèmes disponibles + commandes de
+   lancement.
+3. Chargement de l'export SQLite + vérification de version + **façade `platform_key`**
+   (§9.1).
+4. Scanner de ROMs incrémental par hash → statuts vert / rouge / noir.
+5. Interface QML : liste + recherche.
+6. Badges de langue en vue liste — **bloqué tant que `exp_game_language` n'est pas livré**
+   (§9.2).
+7. Filtres — statiques d'abord, dynamiques ensuite.
+8. Fiche de jeu + lancement effectif + détail des langues par plateforme.
+9. **Second adaptateur (Recalbox)** — voir ci-dessous.
+10. Empaquetage et intégration au démarrage (déclenche la phase 2 Git).
+
+> **Note d'ordonnancement** : l'étape 6 est placée après la liste nue *volontairement*. Une
+> liste qui défile de façon fluide **sans** badges est le point de référence de performance ;
+> on mesure ensuite le coût réel des badges par rapport à cette base.
+
+### Le test qui valide l'abstraction
+
+Le second adaptateur (étape 9) n'est **pas une fonctionnalité, c'est un test de
+conception**, et il arrive volontairement **avant** l'empaquetage.
+
+> **Critère de réussite : ajouter le support Recalbox ne doit toucher que l'adaptateur.**
+> Si l'ajout impose de modifier le chargeur de catalogue, le scanner ou une vue QML,
+> l'abstraction est fausse — il faut la corriger **à ce moment-là**, pas après avoir
+> empaqueté.
+
+Tant que ce test n'est pas passé, la compatibilité multi-OS reste **une intention, pas une
+propriété**.
