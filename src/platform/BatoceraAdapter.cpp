@@ -1,6 +1,7 @@
 #include "platform/BatoceraAdapter.h"
 
 #include "platform/CommandLine.h"
+#include "systems/EsSystemsParser.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -93,6 +94,27 @@ QString BatoceraAdapter::systemsFilePath() const
             return path;
     }
     return {}; // introuvable : à traiter par l'appelant, pas à masquer
+}
+
+QList<SystemEntry> BatoceraAdapter::readSystems(QString *error) const
+{
+    const QString path = systemsFilePath();
+    if (path.isEmpty()) {
+        if (error)
+            *error = QStringLiteral("aucun es_systems.cfg sous %1").arg(m_root);
+        return {};
+    }
+
+    // Batocera suit la convention EmulationStation : le parser du lot 2 sait la lire.
+    const auto result = systems::parseEsSystemsFile(path);
+    if (!result.ok()) {
+        if (error)
+            *error = result.error.message; // verbatim (§15)
+        return {};
+    }
+    if (error)
+        error->clear();
+    return result.systems;
 }
 
 QString BatoceraAdapter::resolvePlatformKey(const QString &platformKey,

@@ -1,23 +1,19 @@
 #pragma once
 
-// Implémentation Batocera de l'adaptateur — cible de référence (§1).
+// Implémentation Recalbox — cible de validation (§1), et surtout TEST DE CONCEPTION (§13).
 //
-// C'est ici, et nulle part ailleurs, que vivent les chemins « /userdata/… ». Le test
-// no-distro-literals refuse ces chaînes partout hors de src/platform/.
+// C'est ici, et nulle part ailleurs, que vivent les chemins « /recalbox/… » et la lecture
+// du format systemlist.xml.
 
 #include "platform/PlatformAdapter.h"
 
 namespace igiris::platform {
 
-class BatoceraAdapter final : public PlatformAdapter
+class RecalboxAdapter final : public PlatformAdapter
 {
 public:
-    // `rootPrefix` préfixe tous les chemins absolus. « / » sur un vrai appareil ; un
-    // répertoire temporaire dans les tests, ou le point de montage d'une image.
-    // Sans ce paramètre, l'adaptateur ne serait testable que sur la machine cible.
-    explicit BatoceraAdapter(QString rootPrefix = QStringLiteral("/"));
+    explicit RecalboxAdapter(QString rootPrefix = QStringLiteral("/"));
 
-    // Reconnaît-on une installation Batocera sous cette racine ?
     static bool detect(const QString &rootPrefix);
 
     QString      id() const override;

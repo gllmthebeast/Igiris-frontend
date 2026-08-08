@@ -5,7 +5,7 @@
 // Tout ce qui est spécifique à une distribution est isolé derrière cette interface, qui
 // expose EXACTEMENT QUATRE choses :
 //
-//   1. localiser le fichier de description des systèmes
+//   1. FOURNIR les systèmes déclarés (les localiser ET lire leur format)
 //   2. résoudre une platform_key du catalogue vers le nom de système local
 //   3. localiser les dossiers de ROMs
 //   4. lancer — construire et exécuter la commande, substitution de %ROM%
@@ -17,6 +17,7 @@
 // scan, statuts, vues QML — ne sait pas sur quelle distribution il tourne.
 
 #include <QFlags>
+#include <QList>
 #include <QString>
 #include <QStringList>
 
@@ -111,8 +112,19 @@ public:
     virtual Capabilities capabilities() const = 0;
     bool supports(Capability c) const { return capabilities().testFlag(c); }
 
-    // (1) Localiser le fichier de description des systèmes.
-    //     Chaîne vide si introuvable — l'appelant doit le traiter, pas planter.
+    // (1) Fournir les systèmes déclarés par cette installation.
+    //
+    //     ⚠️ Corrigé au lot 9. L'interface exposait d'abord `systemsFilePath()`, en
+    //     supposant que toutes les distributions partagent UN format que le projet
+    //     parserait une fois pour toutes. Recalbox dément cette hypothèse : son
+    //     systemlist.xml met name, fullname, path et command en ATTRIBUTS XML, là où la
+    //     convention EmulationStation utilise des éléments enfants.
+    //
+    //     Chaque adaptateur lit donc son propre format. Le chemin reste exposé, mais pour
+    //     le diagnostic seulement — ce n'est plus le contrat.
+    virtual QList<SystemEntry> readSystems(QString *error) const = 0;
+
+    //     Où l'adaptateur a trouvé sa description. Diagnostic, pas contrat.
     virtual QString systemsFilePath() const = 0;
 
     // (2) Résoudre une platform_key du catalogue vers le nom de système local.

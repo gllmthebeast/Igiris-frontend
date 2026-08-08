@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 
 # SemVer strict (CLAUDE.md §15) : cette version est la seule source de vérité.
 # Elle alimente version.h, et c'est elle qu'affiche `igiris-frontend --version`.
-project(igiris-frontend VERSION 0.8.0 LANGUAGES CXX)
+project(igiris-frontend VERSION 0.10.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -24,7 +24,12 @@ configure_file(src/version.h.in ${CMAKE_BINARY_DIR}/generated/version.h @ONLY)
 add_library(igiris-platform STATIC
     src/platform/CommandLine.cpp
     src/platform/BatoceraAdapter.cpp
+    src/platform/RecalboxAdapter.cpp
     src/platform/AdapterRegistry.cpp
+    # Le lecteur du format EmulationStation vit avec les adaptateurs qui s'en servent :
+    # c'est une couche FORMAT, sous l'adaptateur. L'en tenir séparé créait une dépendance
+    # circulaire dès qu'un adaptateur a dû lire lui-même sa description (lot 9).
+    src/systems/EsSystemsParser.cpp
 )
 
 # Lot 2 — lecture du fichier de description des systèmes. Format de la famille
@@ -72,7 +77,7 @@ qt_add_qml_module(igiris-frontend
 )
 
 target_include_directories(igiris-frontend PRIVATE ${CMAKE_BINARY_DIR}/generated)
-target_link_libraries(igiris-frontend PRIVATE Qt6::Quick SQLite::SQLite3 igiris-platform igiris-systems igiris-catalog igiris-scan igiris-ui)
+target_link_libraries(igiris-frontend PRIVATE Qt6::Quick SQLite::SQLite3 igiris-platform igiris-catalog igiris-scan igiris-ui)
 
 # ---------------------------------------------------------------------------------------
 # Tests
@@ -96,8 +101,13 @@ add_executable(test-platform-adapter tests/test_platform_adapter.cpp)
 target_link_libraries(test-platform-adapter PRIVATE igiris-platform Qt6::Test)
 add_test(NAME platform-adapter COMMAND test-platform-adapter)
 
+# Lot 9 — le test de conception du §13.
+add_executable(test-recalbox-adapter tests/test_recalbox_adapter.cpp)
+target_link_libraries(test-recalbox-adapter PRIVATE igiris-platform Qt6::Test)
+add_test(NAME recalbox-adapter COMMAND test-recalbox-adapter)
+
 add_executable(test-es-systems-parser tests/test_es_systems_parser.cpp)
-target_link_libraries(test-es-systems-parser PRIVATE igiris-systems Qt6::Test)
+target_link_libraries(test-es-systems-parser PRIVATE igiris-platform Qt6::Test)
 add_test(NAME es-systems-parser COMMAND test-es-systems-parser)
 
 add_executable(test-export-database tests/test_export_database.cpp)

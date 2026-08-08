@@ -21,7 +21,7 @@
 | 6 | Filtres statiques puis dynamiques | filtres combinables, interactifs | 0.7.0 | Sonnet 5 | moyen | ✅ **fait** |
 | 7 | Fiche de jeu + lancement effectif | **un jeu se lance** | 0.8.0 | Opus 5 | moyen | ✅ **fait** |
 | 8 | Badges de langue | badges illuminé/grisé + filtres langue | 0.9.0 | Opus 5 | moyen | 🔒 **bloqué** |
-| 9 | Second adaptateur (Recalbox) | Recalbox marche **sans toucher** au reste | 0.10.0 | Opus 5 | faible en code | à faire |
+| 9 | Second adaptateur (Recalbox) | Recalbox marche **sans toucher** au reste | 0.10.0 | Opus 5 | faible en code | ⚠️ **fait — flaw corrigé** |
 | 10 | Empaquetage + démarrage | image qui boote sur le frontend | 1.0.0 | Sonnet 5 | moyen | à faire |
 
 ---
@@ -193,10 +193,53 @@ Si le backend livre tôt, ce lot se replace juste après le lot 6.
 
 ### Lot 9 — Second adaptateur (Recalbox) · 0.10.0
 
-**Ce n'est pas une fonctionnalité, c'est le test qui valide l'abstraction du lot 1**, et il
-reste **avant** l'empaquetage comme le §13 l'exige.
+**Ce n'est pas une fonctionnalité, c'est le test qui valide l'abstraction du lot 1.**
+Il a fait son travail : **il a échoué, et il a révélé un vrai défaut de conception.**
 
-> Critère de réussite : ajouter Recalbox ne doit toucher **que** l'adaptateur.
+#### Ce que Recalbox a démenti
+
+Le format n'est **pas** celui d'EmulationStation. Tout est en **attributs XML** :
+
+```xml
+<system name="snes" fullname="Super Nintendo">
+  <descriptor path="…" extensions="…" theme="…" command="…"/>
+```
+
+là où la convention ES écrit `<name>snes</name>`. Schéma établi depuis
+`SystemDeserializer.cpp` du dépôt Recalbox.
+
+Son lanceur diffère aussi : `-emulator` et `-core` y sont **obligatoires**
+(`configgen/emulatorlauncher.py`), et ni `-gameinfoxml` ni `-systemname` n'existent.
+
+#### Le défaut, et sa correction
+
+L'interface exposait `systemsFilePath()` : elle **supposait un format unique**, parsé une
+fois pour toutes par `src/systems/`. Conséquence, `main.cpp` appelait lui-même
+`parseEsSystemsFile()` — le point d'entrée connaissait un format de distribution.
+
+L'interface expose désormais **`readSystems()`** : chaque adaptateur lit le sien.
+Le §13 exige de corriger « à ce moment-là, pas après avoir empaqueté » — c'est fait.
+
+#### Mesure du critère
+
+| Zone | Lignes touchées |
+|---|---|
+| `src/platform/` (l'adaptateur) | +45 / −5, plus 2 fichiers neufs |
+| `src/main.cpp` (composition) | +20 / −13 — **le défaut corrigé** |
+| `CMakeLists.txt` | +13 / −3 |
+| **`src/catalog/`** | **0** |
+| **`src/scan/`** | **0** |
+| **`src/ui/`** | **0** |
+| **`src/systems/`** | **0** |
+| **`qml/`** | **0** |
+
+Le §13 nomme explicitement le **chargeur de catalogue**, le **scanner** et les **vues
+QML** : ces trois-là sont à **zéro ligne**. L'écart porte sur le point d'entrée, qui
+faisait le travail de l'adaptateur — et c'est précisément ce que le test devait exposer.
+
+> ⚠️ Contrairement à Batocera, **aucun `systemlist.xml` réel n'a pu être récupéré** :
+> l'adaptateur est conforme au schéma publié, pas encore confronté à un fichier de
+> production. À vérifier sur une image Recalbox avant de considérer la cible validée.
 
 ### Lot 10 — Empaquetage et intégration au démarrage · 1.0.0
 

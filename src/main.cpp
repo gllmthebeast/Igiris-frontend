@@ -499,25 +499,32 @@ int main(int argc, char *argv[])
     detail.setCatalogue(&catalogue);
     detail.setAdapter(adapter.get());
 
-    QString systemsPath = systemsFileOverride;
-    if (systemsPath.isEmpty() && adapter)
-        systemsPath = adapter->systemsFilePath();
+    // C'est l'ADAPTATEUR qui lit sa description, pas ce point d'entrée. Avant le lot 9,
+    // main.cpp appelait lui-même le parser du format EmulationStation — il supposait donc
+    // que toutes les distributions partagent ce format, ce que Recalbox dément.
+    if (adapter) {
+        QString    systemsError;
+        const auto systems = systemsFileOverride.isEmpty()
+                                 ? adapter->readSystems(&systemsError)
+                                 : igiris::systems::parseEsSystemsFile(systemsFileOverride)
+                                       .systems;
 
-    if (!systemsPath.isEmpty()) {
-        const auto parsed = igiris::systems::parseEsSystemsFile(systemsPath);
-        if (parsed.ok()) {
+        if (systems.isEmpty() && !systemsError.isEmpty()) {
+            std::fprintf(stderr, "⚠ %s\n", qPrintable(systemsError)); // verbatim (§15)
+        } else {
             QHash<QString, igiris::platform::SystemEntry> byName;
-            for (const auto &system : parsed.systems)
+            for (const auto &system : systems)
                 byName.insert(system.name, system);
             detail.setLocalSystems(byName);
             std::printf("systèmes locaux : %lld (%s)\n",
-                        static_cast<long long>(byName.size()), qPrintable(systemsPath));
-        } else {
-            std::fprintf(stderr, "⚠ %s\n", qPrintable(parsed.error.message));
+                        static_cast<long long>(byName.size()),
+                        qPrintable(systemsFileOverride.isEmpty()
+                                       ? adapter->systemsFilePath()
+                                       : systemsFileOverride));
         }
     } else {
-        std::fprintf(stderr, "⚠ aucun fichier de description des systèmes : statuts et "
-                             "lancement indisponibles\n");
+        std::fprintf(stderr, "⚠ aucune distribution reconnue : statuts et lancement "
+                             "indisponibles\n");
     }
 
     // Ouvrir directement la fiche d'un jeu, pour la capture comme pour l'inspection.
