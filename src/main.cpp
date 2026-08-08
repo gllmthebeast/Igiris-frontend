@@ -13,6 +13,10 @@
 
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
+#include <QQmlContext>
+#include <QQuickWindow>
+#include <QElapsedTimer>
+#include <QTimer>
 #include <QDir>
 #include <QHash>
 #include <QSet>
@@ -23,6 +27,7 @@
 #include "scan/ScanCache.h"
 #include "platform/AdapterRegistry.h"
 #include "systems/EsSystemsParser.h"
+#include "ui/GameListModel.h"
 #include "version.h"
 
 namespace {
@@ -362,11 +367,47 @@ int main(int argc, char *argv[])
         }
     }
 
+    // Capture d'écran : rendu sans écran ni GPU, pour juger l'interface depuis une
+    // machine de build. Doit être posé AVANT la construction de QGuiApplication.
+    QString screenshotPath;
+    QString initialFilter;
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) {
+            screenshotPath = QString::fromLocal8Bit(argv[i + 1]);
+            if (i + 2 < argc)
+                initialFilter = QString::fromLocal8Bit(argv[i + 2]);
+            qputenv("QT_QPA_PLATFORM", "offscreen");
+            qputenv("QT_QUICK_BACKEND", "software");
+        }
+    }
+
     QGuiApplication app(argc, argv);
     QGuiApplication::setApplicationName(QStringLiteral("igiris-frontend"));
     QGuiApplication::setApplicationVersion(QStringLiteral(IGIRIS_FRONTEND_VERSION));
 
+    // Chargement du catalogue. Le §17 fait de la liste nue le point de référence de
+    // performance : on mesure donc ce que coûte l'alimentation du modèle.
+    igiris::catalog::ExportDatabase catalogue;
+    igiris::ui::GameListModel       games;
+    QString                         catalogueError;
+
+    QElapsedTimer timer;
+    timer.start();
+    if (catalogue.open(QStringLiteral("data/games.db"), &catalogueError)) {
+        const qint64 opened = timer.elapsed();
+        games.setGames(catalogue.allGames());
+        std::printf("catalogue : %d jeux · ouverture %lld ms · chargement %lld ms\n",
+                    games.totalCount(), static_cast<long long>(opened),
+                    static_cast<long long>(timer.elapsed() - opened));
+    } else {
+        std::fprintf(stderr, "⚠ %s — interface chargée sans catalogue\n",
+                     qPrintable(catalogueError));
+    }
+    if (!initialFilter.isEmpty())
+        games.setFilter(initialFilter);
+
     QQmlApplicationEngine engine;
+    engine.rootContext()->setContextProperty(QStringLiteral("games"), &games);
 
     // CLAUDE.md §15 : « Erreurs remontées verbatim, jamais avalées ni reformulées. »
     // Un échec de création d'objet QML doit tuer le processus avec un code non nul,
@@ -382,6 +423,27 @@ int main(int argc, char *argv[])
     engine.load(QUrl(QStringLiteral("qrc:/qt/qml/IgirisFrontend/qml/Main.qml")));
     if (engine.rootObjects().isEmpty())
         return 1;
+
+    if (!screenshotPath.isEmpty()) {
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        if (!window) {
+            std::fprintf(stderr, "✗ l'objet racine QML n'est pas une fenêtre\n");
+            return 1;
+        }
+        // Laisser le temps à la première image d'être composée avant de la saisir.
+        QTimer::singleShot(700, &app, [window, screenshotPath, &app]() {
+            const QImage image = window->grabWindow();
+            if (image.isNull() || !image.save(screenshotPath)) {
+                std::fprintf(stderr, "✗ capture impossible : %s\n",
+                             qPrintable(screenshotPath));
+                app.exit(1);
+                return;
+            }
+            std::printf("capture %dx%d → %s\n", image.width(), image.height(),
+                        qPrintable(screenshotPath));
+            app.quit();
+        });
+    }
 
     return app.exec();
 }

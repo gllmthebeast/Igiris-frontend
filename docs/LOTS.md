@@ -17,7 +17,7 @@
 | 2 | Parser `es_systems` | CLI : liste systèmes + commandes de lancement | 0.3.0 | Sonnet 5 | moyen | ✅ **fait** |
 | 3 | Chargeur d'export + façade `platform_key` | les 4 requêtes du §3 rejouées en C++ | 0.4.0 | Opus 5 | moyen | ✅ **fait** |
 | 4 | Scanner de ROMs | rapport CLI vert / rouge / noir | 0.5.0 | Opus 5 | **élevé** | ✅ **fait** |
-| 5 | IHM QML : liste + recherche | binaire affichant la liste, navigation manette | 0.6.0 | Sonnet 5 | moyen | à faire |
+| 5 | IHM QML : liste + recherche | binaire affichant la liste, navigation manette | 0.6.0 | Sonnet 5 | moyen | ✅ **fait** |
 | 6 | Filtres statiques puis dynamiques | filtres combinables, interactifs | 0.7.0 | Sonnet 5 | moyen | à faire |
 | 7 | Fiche de jeu + lancement effectif | **un jeu se lance** | 0.8.0 | Opus 5 | moyen | à faire |
 | 8 | Badges de langue | badges illuminé/grisé + filtres langue | 0.9.0 | Opus 5 | moyen | 🔒 **bloqué** |
@@ -92,6 +92,22 @@ Les erreurs y sont **silencieuses** : ça ne plante pas, ça affiche du rouge à
 Navigation par focus, pilotage manette. **Point de référence de performance** : une liste
 qui défile sans badges, mesurée avant d'ajouter quoi que ce soit (note d'ordonnancement du
 §17).
+
+**Mesure de référence** (VM aarch64, 7 581 jeux) : ouverture de l'export < 1 ms, chargement
+du modèle **10 ms**. Le filtrage est en mémoire — interroger SQLite à chaque frappe ne
+tiendrait pas l'exigence d'interactivité du §6.
+
+> ⚠️ Le rendu de la VM passe par le backend **logiciel** de Qt Quick : il valide la mise en
+> page et la logique, **pas** la fluidité du défilement. Le vrai point de référence de
+> performance devra être repris sur l'appareil.
+
+**Décision** : `QtQuick` seul, **sans `QtQuick.Controls`**. Chaque module Qt ajouté doit
+être cross-compilé dans les images Buildroot des distributions cibles (§12) ; un champ de
+saisie ne vaut pas cette dépendance, `TextInput` fait le travail.
+
+**Captures sans écran** : `igiris-frontend --screenshot <fichier.png> [filtre]` force la
+plateforme `offscreen` et le backend logiciel, puis saisit la fenêtre. C'est ce qui permet
+de juger l'interface depuis une machine de build.
 
 ### Lot 6 — Filtres · 0.7.0
 

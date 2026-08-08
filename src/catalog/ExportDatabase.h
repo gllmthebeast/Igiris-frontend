@@ -33,6 +33,8 @@ struct ExportMeta {
 struct Game {
     QString gameKey;
     QString title;
+    // Nom NORMALISÉ, pour la recherche locale — jamais à afficher (§3).
+    QString searchKey;
     int     year   = 0;
     int     rating = 0;
 };
@@ -103,6 +105,10 @@ public:
 
     // §3, requête 3 — recherche par nom. `needle` est comparé au search_key normalisé.
     QList<Game> searchByName(const QString &needle, int limit = 50) const;
+
+    // Tout le catalogue, trié par titre. C'est ce que charge la liste de l'accueil : le
+    // §0 impose d'afficher TOUS les jeux, ROM présente ou non.
+    QList<Game> allGames() const;
 
     // §3, requête 4 — meilleure version d'un jeu, et sa fidélité d'émulation.
     QList<GamePlatform> platformsForGame(const QString &gameKey) const;

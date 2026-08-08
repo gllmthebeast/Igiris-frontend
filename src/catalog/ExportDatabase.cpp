@@ -241,7 +241,7 @@ QList<Game> ExportDatabase::searchByName(const QString &needle, int limit) const
         return games;
 
     sqlite3_stmt *stmt = prepare(
-        m_db, QStringLiteral("SELECT game_key, title, year, rating FROM exp_game "
+        m_db, QStringLiteral("SELECT game_key, title, year, rating, search_key FROM exp_game "
                              "WHERE search_key LIKE '%' || ? || '%' "
                              "ORDER BY rating DESC LIMIT ?"));
     if (!stmt)
@@ -256,7 +256,33 @@ QList<Game> ExportDatabase::searchByName(const QString &needle, int limit) const
         game.gameKey = columnText(stmt, 0);
         game.title   = columnText(stmt, 1);
         game.year    = sqlite3_column_int(stmt, 2);
-        game.rating  = sqlite3_column_int(stmt, 3);
+        game.rating    = sqlite3_column_int(stmt, 3);
+        game.searchKey = columnText(stmt, 4);
+        games.append(game);
+    }
+    sqlite3_finalize(stmt);
+    return games;
+}
+
+QList<Game> ExportDatabase::allGames() const
+{
+    QList<Game> games;
+    if (!m_db)
+        return games;
+
+    sqlite3_stmt *stmt = prepare(m_db,
+                                 QStringLiteral("SELECT game_key, title, year, rating, "
+                                                "search_key FROM exp_game ORDER BY title"));
+    if (!stmt)
+        return games;
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        Game game;
+        game.gameKey   = columnText(stmt, 0);
+        game.title     = columnText(stmt, 1);
+        game.year      = sqlite3_column_int(stmt, 2);
+        game.rating    = sqlite3_column_int(stmt, 3);
+        game.searchKey = columnText(stmt, 4);
         games.append(game);
     }
     sqlite3_finalize(stmt);
