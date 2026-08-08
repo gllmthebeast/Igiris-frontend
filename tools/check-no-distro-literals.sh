@@ -29,9 +29,19 @@ if [ ${#SEARCH_DIRS[@]} -eq 0 ]; then
     exit 1
 fi
 
-# --exclude-dir ne s'applique qu'au nom de dossier, ce qui suffit : l'adaptateur vit dans
-# src/platform/ et nulle part ailleurs.
-hits="$(grep -rIn -i -E "$PATTERN" "${SEARCH_DIRS[@]}" --exclude-dir=platform 2>/dev/null || true)"
+# Deux exclusions, et deux seulement :
+#
+#   --exclude-dir=platform   l'adaptateur, zone autorisée par le §1.
+#
+#   --exclude=ExportSchema.h UN fichier nommément désigné. La colonne de l'export
+#                            s'appelle « batocera_system » : c'est un nom imposé par un
+#                            contrat de données externe, qu'on ne peut pas renommer depuis
+#                            ce dépôt. Le §9.1 exige qu'un SEUL endroit le connaisse et
+#                            expose « platform_key » au reste ; ce fichier est cet endroit.
+#                            L'exclusion porte sur le FICHIER, pas sur son répertoire :
+#                            toute autre occurrence dans src/catalog/ reste refusée.
+hits="$(grep -rIn -i -E "$PATTERN" "${SEARCH_DIRS[@]}" \
+            --exclude-dir=platform --exclude=ExportSchema.h 2>/dev/null || true)"
 
 if [ -n "$hits" ]; then
     echo "✗ Chaîne spécifique à une distribution trouvée hors de l'adaptateur (§1) :"

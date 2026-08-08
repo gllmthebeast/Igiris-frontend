@@ -15,7 +15,7 @@
 | 0 | Socle de projet | `cmake --build` passe, binaire vide qui démarre | 0.1.0 | Sonnet 5 | faible | ✅ **fait** |
 | 1 | Adaptateur de plateforme + Batocera | tests sur arborescence factice | 0.2.0 | Opus 5 | **élevé** | ✅ **fait** |
 | 2 | Parser `es_systems` | CLI : liste systèmes + commandes de lancement | 0.3.0 | Sonnet 5 | moyen | ✅ **fait** |
-| 3 | Chargeur d'export + façade `platform_key` | les 4 requêtes du §3 rejouées en C++ | 0.4.0 | Opus 5 | moyen | à faire |
+| 3 | Chargeur d'export + façade `platform_key` | les 4 requêtes du §3 rejouées en C++ | 0.4.0 | Opus 5 | moyen | ✅ **fait** |
 | 4 | Scanner de ROMs | rapport CLI vert / rouge / noir | 0.5.0 | Opus 5 | **élevé** | à faire |
 | 5 | IHM QML : liste + recherche | binaire affichant la liste, navigation manette | 0.6.0 | Sonnet 5 | moyen | à faire |
 | 6 | Filtres statiques puis dynamiques | filtres combinables, interactifs | 0.7.0 | Sonnet 5 | moyen | à faire |
@@ -95,6 +95,28 @@ Statiques d'abord (index de l'export), dynamiques ensuite (croisement avec l'ind
 
 **Le vrai jalon** : à la fin de ce lot, la boucle est bouclée — on voit ses jeux, on en
 choisit un, il se lance. Tout ce qui suit est de l'enrichissement.
+
+> ⚠️ **Prérequis découvert au lot 3, sur le vrai `es_systems.cfg` de Batocera 43.1.**
+>
+> La commande de lancement réelle est la même pour tous les systèmes :
+> ```
+> emulatorlauncher %CONTROLLERSCONFIG% -system %SYSTEM% -rom %ROM% \
+>                  -gameinfoxml %GAMEINFOXML% -systemname %SYSTEMNAME%
+> ```
+> Sur 5 placeholders, le lot 1 n'en gère que **2** (`%ROM%`, `%SYSTEM%`). Comme `launch()`
+> refuse de partir sur un placeholder inconnu, **aucun jeu ne se lancerait** : le refus
+> porterait sur 100 % des systèmes.
+>
+> Les trois manquants sont produits **à l'exécution par EmulationStation**, que ce projet
+> remplace — c'est donc à nous de les fabriquer :
+> - `%CONTROLLERSCONFIG%` — description des manettes branchées ;
+> - `%GAMEINFOXML%` — fiche du jeu passée à l'émulateur ;
+> - `%SYSTEMNAME%` — nom de système transmis au launcher.
+>
+> Leur sémantique exacte est **à établir depuis les sources de `batocera-emulationstation`
+> avant d'écrire quoi que ce soit** : les inventer produirait des lancements qui échouent
+> de façon obscure. Le refus actuel est le bon comportement en attendant — il est bruyant,
+> pas silencieux.
 
 ### Lot 8 — Badges de langue · 0.9.0 · 🔒 BLOQUÉ
 

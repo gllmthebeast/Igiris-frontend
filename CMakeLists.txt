@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 
 # SemVer strict (CLAUDE.md §15) : cette version est la seule source de vérité.
 # Elle alimente version.h, et c'est elle qu'affiche `igiris-frontend --version`.
-project(igiris-frontend VERSION 0.3.0 LANGUAGES CXX)
+project(igiris-frontend VERSION 0.4.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -36,6 +36,14 @@ target_link_libraries(igiris-systems PUBLIC Qt6::Core igiris-platform)
 target_include_directories(igiris-platform PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(igiris-platform PUBLIC Qt6::Core)
 
+# Lot 3 — chargeur de l'export SQLite. Façade du §9.1 : au-dessus de cette bibliothèque,
+# le vocabulaire est « platformKey » et le nom réel de la colonne n'existe plus.
+add_library(igiris-catalog STATIC
+    src/catalog/ExportDatabase.cpp
+)
+target_include_directories(igiris-catalog PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(igiris-catalog PUBLIC Qt6::Core SQLite::SQLite3)
+
 qt_add_executable(igiris-frontend src/main.cpp)
 
 qt_add_qml_module(igiris-frontend
@@ -48,7 +56,7 @@ qt_add_qml_module(igiris-frontend
 )
 
 target_include_directories(igiris-frontend PRIVATE ${CMAKE_BINARY_DIR}/generated)
-target_link_libraries(igiris-frontend PRIVATE Qt6::Quick SQLite::SQLite3 igiris-platform igiris-systems)
+target_link_libraries(igiris-frontend PRIVATE Qt6::Quick SQLite::SQLite3 igiris-platform igiris-systems igiris-catalog)
 
 # ---------------------------------------------------------------------------------------
 # Tests
@@ -75,3 +83,10 @@ add_test(NAME platform-adapter COMMAND test-platform-adapter)
 add_executable(test-es-systems-parser tests/test_es_systems_parser.cpp)
 target_link_libraries(test-es-systems-parser PRIVATE igiris-systems Qt6::Test)
 add_test(NAME es-systems-parser COMMAND test-es-systems-parser)
+
+add_executable(test-export-database tests/test_export_database.cpp)
+target_link_libraries(test-export-database PRIVATE igiris-catalog Qt6::Test)
+# Permet au test d'aller chercher le vrai export s'il est présent, sans chemin en dur.
+target_compile_definitions(test-export-database
+                           PRIVATE IGIRIS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+add_test(NAME export-database COMMAND test-export-database)
