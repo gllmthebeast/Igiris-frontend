@@ -66,7 +66,7 @@ Window {
             onTextChanged: games.filter = text
 
             // La liste doit rester atteignable à la manette : bas quitte la recherche.
-            Keys.onDownPressed: list.forceActiveFocus()
+            Keys.onDownPressed: platformCell.forceActiveFocus()
 
             Text {
                 anchors.fill: parent
@@ -88,11 +88,99 @@ Window {
         }
     }
 
+    // ------------------------------------------------------------------ filtres
+    //
+    // Statiques (plateforme, décennie, arcade) et dynamique (possession) côte à côte,
+    // mais le dynamique se grise tant qu'aucun scan local n'a eu lieu (§6).
+    Rectangle {
+        id: filterBar
+
+        anchors { top: searchBar.bottom; left: parent.left; right: parent.right }
+        height: 60
+        color: theme.background
+
+        Row {
+            id: filterRow
+            anchors { left: parent.left; leftMargin: 24; verticalCenter: parent.verticalCenter }
+            spacing: 12
+
+            FilterCell {
+                id: platformCell
+                KeyNavigation.down: list
+                KeyNavigation.up: searchField
+                label: qsTr("Plateforme")
+                values: [""].concat(games.availablePlatforms)
+                textColor: theme.text; dimColor: theme.dim; focusColor: theme.selection
+                // Refléter un filtre préréglé : sinon la barre affiche « tout » alors que
+                // la liste est filtrée — exactement le défaut corrigé au lot 5.
+                Component.onCompleted: {
+                    var i = values.indexOf(games.platformFilter)
+                    if (i > 0) currentIndex = i
+                }
+                onCurrentValueChanged: games.platformFilter = currentValue
+                KeyNavigation.right: decadeCell
+            }
+
+            FilterCell {
+                id: decadeCell
+                KeyNavigation.down: list
+                KeyNavigation.up: searchField
+                label: qsTr("Décennie")
+                values: [""].concat(games.availableDecades)
+                textColor: theme.text; dimColor: theme.dim; focusColor: theme.selection
+                Component.onCompleted: {
+                    var i = values.indexOf(games.decadeFilter)
+                    if (i > 0) currentIndex = i
+                }
+                onCurrentValueChanged: games.decadeFilter = currentValue === "" ? 0 : parseInt(currentValue)
+                KeyNavigation.left: platformCell
+                KeyNavigation.right: arcadeCell
+            }
+
+            FilterCell {
+                id: arcadeCell
+                KeyNavigation.down: list
+                KeyNavigation.up: searchField
+                label: qsTr("Type")
+                values: ["", qsTr("arcade")]
+                anyLabel: qsTr("tous")
+                textColor: theme.text; dimColor: theme.dim; focusColor: theme.selection
+                Component.onCompleted: if (games.arcadeOnly) currentIndex = 1
+                onCurrentValueChanged: games.arcadeOnly = currentValue !== ""
+                KeyNavigation.left: decadeCell
+                KeyNavigation.right: ownedCell
+            }
+
+            FilterCell {
+                id: ownedCell
+                KeyNavigation.down: list
+                KeyNavigation.up: searchField
+                label: qsTr("Possession")
+                values: ["", qsTr("possédés"), qsTr("manquants")]
+                available: games.ownershipAvailable
+                unavailableHint: qsTr("aucun scan local")
+                textColor: theme.text; dimColor: theme.dim; focusColor: theme.selection
+                Component.onCompleted: currentIndex = games.ownership
+                onCurrentIndexChanged: games.ownership = currentIndex
+                KeyNavigation.left: arcadeCell
+            }
+        }
+
+        // Rappel des filtres de LANGUE prévus au §6 mais impossibles aujourd'hui :
+        // ils dépendent d'exp_game_language, absent de l'export 1.3.0 (§9.2).
+        Text {
+            anchors { right: parent.right; rightMargin: 24; verticalCenter: parent.verticalCenter }
+            text: qsTr("langues : export 1.4.0 requis")
+            color: theme.dim
+            font.pixelSize: 15
+        }
+    }
+
     // ------------------------------------------------------------------- liste
     ListView {
         id: list
 
-        anchors { top: searchBar.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
+        anchors { top: filterBar.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
 
         model: games
         focus: true
@@ -109,7 +197,7 @@ Window {
 
         Keys.onUpPressed: {
             if (currentIndex === 0)
-                searchField.forceActiveFocus()
+                platformCell.forceActiveFocus()
             else
                 decrementCurrentIndex()
         }

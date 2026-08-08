@@ -395,16 +395,69 @@ int main(int argc, char *argv[])
     timer.start();
     if (catalogue.open(QStringLiteral("data/games.db"), &catalogueError)) {
         const qint64 opened = timer.elapsed();
-        games.setGames(catalogue.allGames());
-        std::printf("catalogue : %d jeux · ouverture %lld ms · chargement %lld ms\n",
-                    games.totalCount(), static_cast<long long>(opened),
+        // Les index des filtres STATIQUES sont construits ici, une fois : le §6 exige
+        // qu'une combinaison de filtres reste interactive à la manette.
+        games.setCatalogue(catalogue.allGames(), catalogue.platformKeysByGame(),
+                           catalogue.arcadePlatformKeys());
+        std::printf("catalogue : %d jeux · %lld plateformes · ouverture %lld ms · "
+                    "chargement %lld ms\n",
+                    games.totalCount(),
+                    static_cast<long long>(games.availablePlatforms().size()),
+                    static_cast<long long>(opened),
                     static_cast<long long>(timer.elapsed() - opened));
+
+        // Filtre DYNAMIQUE : il n'existe qu'après un scan local. Sans --roms, l'interface
+        // le signale au lieu de proposer un filtre qui ne filtrerait rien.
+        for (int i = 1; i < argc; ++i) {
+            if (std::strcmp(argv[i], "--roms") != 0 || i + 1 >= argc)
+                continue;
+            const QString romsDir = QString::fromLocal8Bit(argv[i + 1]);
+
+            QList<igiris::scan::ScanTarget> targets;
+            const QStringList knownKeys = catalogue.allPlatformKeys();
+            const QDir        root(romsDir);
+            for (const QString &entry :
+                 root.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
+                if (knownKeys.contains(entry))
+                    targets.append({ entry, root.absoluteFilePath(entry) });
+            }
+
+            igiris::scan::ScanCache cache;
+            cache.open(romsDir + QStringLiteral("/.igiris-scan-cache.db"), nullptr);
+            igiris::scan::RomScanner scanner(catalogue, cache.isOpen() ? &cache : nullptr);
+            const auto               report = scanner.scan(targets);
+
+            const QStringList owned = report.ownedGameKeys();
+            games.setOwnedGameKeys(QSet<QString>(owned.cbegin(), owned.cend()));
+            std::printf("scan local : %d fichiers · %lld jeux possédés\n", report.filesSeen,
+                        static_cast<long long>(owned.size()));
+        }
     } else {
         std::fprintf(stderr, "⚠ %s — interface chargée sans catalogue\n",
                      qPrintable(catalogueError));
     }
     if (!initialFilter.isEmpty())
         games.setFilter(initialFilter);
+
+    // Préréglages de filtres en ligne de commande : ils servent aux captures, mais aussi
+    // à vérifier le comportement sans écran.
+    for (int i = 1; i < argc; ++i) {
+        // « --platform-key » et pas « --platform » : QGuiApplication RÉSERVE --platform
+        // pour choisir son plugin de plateforme (offscreen, xcb…). Le nom court était
+        // capté par Qt avant d'atteindre ce code, et l'application refusait de démarrer.
+        if (std::strcmp(argv[i], "--platform-key") == 0 && i + 1 < argc)
+            games.setPlatformFilter(QString::fromLocal8Bit(argv[i + 1]));
+        else if (std::strcmp(argv[i], "--decade") == 0 && i + 1 < argc)
+            games.setDecadeFilter(QString::fromLocal8Bit(argv[i + 1]).toInt());
+        else if (std::strcmp(argv[i], "--arcade") == 0)
+            games.setArcadeOnly(true);
+        else if (std::strcmp(argv[i], "--owned") == 0)
+            games.setOwnership(igiris::ui::GameListModel::OwnedOnly);
+        else if (std::strcmp(argv[i], "--missing") == 0)
+            games.setOwnership(igiris::ui::GameListModel::MissingOnly);
+    }
+    std::printf("filtres : %d / %d jeux affichés\n", games.visibleCount(),
+                games.totalCount());
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("games"), &games);

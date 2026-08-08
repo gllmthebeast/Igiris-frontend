@@ -18,7 +18,7 @@
 | 3 | Chargeur d'export + façade `platform_key` | les 4 requêtes du §3 rejouées en C++ | 0.4.0 | Opus 5 | moyen | ✅ **fait** |
 | 4 | Scanner de ROMs | rapport CLI vert / rouge / noir | 0.5.0 | Opus 5 | **élevé** | ✅ **fait** |
 | 5 | IHM QML : liste + recherche | binaire affichant la liste, navigation manette | 0.6.0 | Sonnet 5 | moyen | ✅ **fait** |
-| 6 | Filtres statiques puis dynamiques | filtres combinables, interactifs | 0.7.0 | Sonnet 5 | moyen | à faire |
+| 6 | Filtres statiques puis dynamiques | filtres combinables, interactifs | 0.7.0 | Sonnet 5 | moyen | ✅ **fait** |
 | 7 | Fiche de jeu + lancement effectif | **un jeu se lance** | 0.8.0 | Opus 5 | moyen | à faire |
 | 8 | Badges de langue | badges illuminé/grisé + filtres langue | 0.9.0 | Opus 5 | moyen | 🔒 **bloqué** |
 | 9 | Second adaptateur (Recalbox) | Recalbox marche **sans toucher** au reste | 0.10.0 | Opus 5 | faible en code | à faire |
@@ -112,6 +112,31 @@ de juger l'interface depuis une machine de build.
 ### Lot 6 — Filtres · 0.7.0
 
 Statiques d'abord (index de l'export), dynamiques ensuite (croisement avec l'index local).
+
+| Filtre | Nature | État |
+|---|---|---|
+| Plateforme | statique | ✅ 71 clés, issues de l'export |
+| Décennie | statique | ✅ |
+| Arcade | statique | ✅ clés d'arcade lues dans l'export, pas codées |
+| Possédé / manquant | **dynamique** | ✅ après `--roms <dossier>` |
+| Langue (existe / jouable) | statique + dynamique | 🔒 export 1.4.0 requis (§9.2) |
+
+**Le filtre dynamique se grise tant qu'aucun scan local n'a eu lieu**, et l'indique
+(« aucun scan local »). Le masquer laisserait croire qu'il n'existe pas ; l'activer sans
+scan afficherait « tout est manquant », ce qui serait faux et invérifiable. C'est la
+déclaration de capacités du §1 appliquée à l'interface.
+
+Un scan qui ne trouve rien reste un scan : l'information est « tu ne possèdes rien », pas
+« le filtre est indisponible ».
+
+**Coût mesuré** : l'index plateformes-par-jeu porte le chargement de 10 à **25 ms** pour
+7 581 jeux et 18 555 lignes de plateformes. Payé une fois au démarrage, il rend toutes les
+combinaisons de filtres instantanées — ce qu'exige le §6.
+
+> ⚠️ **`--platform` est réservé par Qt.** `QGuiApplication` capte cette option pour choisir
+> son plugin de plateforme (`offscreen`, `xcb`…) : l'application refusait de démarrer avec
+> « Could not find the Qt platform plugin "snes" ». L'option du projet s'appelle
+> `--platform-key`.
 
 ### Lot 7 — Fiche de jeu + lancement effectif · 0.8.0
 

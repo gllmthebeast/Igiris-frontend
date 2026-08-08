@@ -117,6 +117,10 @@ public:
     // systèmes locaux, elle donne le statut noir du §7.
     QStringList allPlatformKeys() const;
 
+    // Clés de plateforme de chaque jeu, en une seule requête. Le filtre « plateforme » du
+    // §6 est STATIQUE : il se résout sur un index de l'export, sans toucher au disque.
+    QHash<QString, QStringList> platformKeysByGame() const;
+
     // Plateformes identifiées par NOM DE ROMSET et non par CRC (§4). Déduit de l'export
     // lui-même plutôt que d'une liste en dur : si le backend ajoute une plateforme
     // d'arcade, le scanner la traite sans qu'on touche au code.

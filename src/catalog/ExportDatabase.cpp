@@ -340,6 +340,32 @@ QStringList ExportDatabase::allPlatformKeys() const
     return keys;
 }
 
+QHash<QString, QStringList> ExportDatabase::platformKeysByGame() const
+{
+    QHash<QString, QStringList> byGame;
+    if (!m_db)
+        return byGame;
+
+    const QString sql = QStringLiteral("SELECT game_key, %1 FROM exp_game_platform "
+                                       "WHERE %1 IS NOT NULL")
+                            .arg(platformColumn());
+    sqlite3_stmt *stmt = prepare(m_db, sql);
+    if (!stmt)
+        return byGame;
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const QString gameKey     = columnText(stmt, 0);
+        const QString platformKey = columnText(stmt, 1);
+        // Dédoublonnage : exp_game_platform a pour clé (game_key, display_name), donc
+        // « SNES » et « SFAM » produisent deux lignes pour la même clé de plateforme.
+        QStringList &keys = byGame[gameKey];
+        if (!keys.contains(platformKey))
+            keys.append(platformKey);
+    }
+    sqlite3_finalize(stmt);
+    return byGame;
+}
+
 QStringList ExportDatabase::arcadePlatformKeys() const
 {
     QStringList keys;
