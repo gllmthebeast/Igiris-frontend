@@ -1,0 +1,12 @@
+#pragma once
+
+// Généré par CMake depuis project(... VERSION ...). Ne pas éditer à la main :
+// la version se change dans CMakeLists.txt, nulle part ailleurs (CLAUDE.md §15).
+#define IGIRIS_FRONTEND_VERSION "@PROJECT_VERSION@"
+#define IGIRIS_FRONTEND_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
+#define IGIRIS_FRONTEND_VERSION_MINOR @PROJECT_VERSION_MINOR@
+#define IGIRIS_FRONTEND_VERSION_PATCH @PROJECT_VERSION_PATCH@
+
+// Version MAJEURE du schéma d'export que ce binaire sait lire (CLAUDE.md §2).
+// Une majeure inconnue doit être refusée explicitement, jamais interprétée au hasard.
+#define IGIRIS_SUPPORTED_EXPORT_MAJOR 1

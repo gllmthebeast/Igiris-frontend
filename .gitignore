@@ -5,3 +5,6 @@ data/
 *.db-shm
 __pycache__/
 *.pyc
+
+# Artefacts de build
+build/
