@@ -50,6 +50,7 @@ private slots:
     // ------------------------------------------------------------ substitution
     void substitute_replacesKnownPlaceholders();
     void substitute_romRawBeforeRom();
+    void substitute_bothRomRawSpellings();
     void substitute_flagsUnknownPlaceholderAndKeepsItVerbatim();
     void substitute_awkwardFilenameStaysOneArgument();
 
@@ -127,6 +128,20 @@ void TestPlatformAdapter::substitute_romRawBeforeRom()
 
     QCOMPARE(out.tokens.first(), QStringLiteral("/roms/a.zip"));
     QVERIFY(out.unresolved.isEmpty());
+}
+
+void TestPlatformAdapter::substitute_bothRomRawSpellings()
+{
+    // Les deux orthographes circulent dans la famille EmulationStation. Un fichier de
+    // référence de 195 systèmes emploie %ROMRAW% ; d'autres emploient %ROM_RAW%.
+    // N'en gérer qu'une casserait les lancements de l'autre sans message.
+    for (const QString &spelling : { QStringLiteral("%ROMRAW%"), QStringLiteral("%ROM_RAW%") }) {
+        const auto out = substitutePlaceholders(
+            QStringList{ spelling },
+            LaunchContext{ QStringLiteral("/roms/a.zip"), QStringLiteral("snes") });
+        QVERIFY2(out.unresolved.isEmpty(), qPrintable(spelling));
+        QCOMPARE(out.tokens.first(), QStringLiteral("/roms/a.zip"));
+    }
 }
 
 void TestPlatformAdapter::substitute_flagsUnknownPlaceholderAndKeepsItVerbatim()
@@ -256,7 +271,7 @@ void TestPlatformAdapter::launch_reallyRunsTheCommand()
 
     SystemEntry system;
     system.name    = QStringLiteral("megadrive");
-    system.command = QStringLiteral("/usr/bin/touch \"%ROM%.lance\"");
+    system.launchOptions = { { QStringLiteral("test"), QStringLiteral("/usr/bin/touch \"%ROM%.lance\"") } };
 
     QString error;
     QVERIFY2(BatoceraAdapter(dir.path()).launch(system, rom, &error),
@@ -276,7 +291,7 @@ void TestPlatformAdapter::launch_refusesUnresolvedPlaceholder()
 
     SystemEntry system;
     system.name    = QStringLiteral("snes");
-    system.command = realisticCommand(); // contient %CONTROLLERSCONFIG%
+    system.launchOptions = { { QStringLiteral("test"), realisticCommand() } }; // contient %CONTROLLERSCONFIG%
 
     QString error;
     QVERIFY(!BatoceraAdapter(dir.path()).launch(system, rom, &error));
@@ -290,7 +305,7 @@ void TestPlatformAdapter::launch_refusesMissingRom()
 
     SystemEntry system;
     system.name    = QStringLiteral("snes");
-    system.command = QStringLiteral("/bin/true %ROM%");
+    system.launchOptions = { { QStringLiteral("test"), QStringLiteral("/bin/true %ROM%") } };
 
     QString error;
     QVERIFY(!BatoceraAdapter(dir.path()).launch(system, dir.filePath("absente.sfc"), &error));

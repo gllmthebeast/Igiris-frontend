@@ -33,20 +33,40 @@ enum class Capability : quint32 {
 Q_DECLARE_FLAGS(Capabilities, Capability)
 Q_DECLARE_OPERATORS_FOR_FLAGS(Capabilities)
 
+// Une façon de lancer un système. Le format en autorise PLUSIEURS par système, chacune
+// étiquetée — constaté dans un vrai fichier : « MAME [Diskette] », « MAME [Cartridge] »,
+// « ColEm »… Supposer une commande unique aurait fait perdre ce choix en silence.
+struct LaunchOption {
+    QString label;   // libellé d'émulateur, éventuellement vide
+    QString command; // ligne de commande BRUTE, lue du fichier
+};
+
 // Une entrée du fichier de description des systèmes.
 //
 // C'est le PARSER (lot 2) qui remplit cette structure ; l'adaptateur ne fait que dire où
-// trouver le fichier. `command` est la ligne lue TELLE QUELLE : le §1 interdit de
-// hardcoder le chemin du script de lancement, parce qu'il change (la version de Python
-// embarquée a déjà bougé plusieurs fois chez Batocera).
+// trouver le fichier. Les commandes sont lues TELLES QUELLES : le §1 interdit de hardcoder
+// le chemin du script de lancement, parce qu'il change (la version de Python embarquée a
+// déjà bougé plusieurs fois chez Batocera).
 struct SystemEntry {
-    QString     name;       // nom de système local, ex. « snes »
-    QString     fullName;   // libellé affichable
-    QString     romPath;    // dossier des ROMs de ce système
-    QStringList extensions; // extensions reconnues
-    QString     command;    // ligne de commande BRUTE, lue du fichier
+    QString name;     // nom de système local, ex. « snes »
+    QString fullName; // libellé affichable
+    // Chemin des ROMs TEL QU'ÉCRIT : il peut contenir des placeholders (« %ROMPATH%/snes »)
+    // ou un « ~ ». Sa résolution est le travail de l'adaptateur, pas du parser.
+    QString     romPath;
+    QString     platform; // clé de plateforme déclarée par le fichier
+    QString     theme;
+    QStringList extensions; // extensions reconnues, en minuscules et dédoublonnées
 
-    bool isValid() const { return !name.isEmpty() && !command.isEmpty(); }
+    QList<LaunchOption> launchOptions;
+
+    // La commande retenue par défaut : la première déclarée. Le fichier les liste par
+    // ordre de préférence.
+    QString defaultCommand() const
+    {
+        return launchOptions.isEmpty() ? QString() : launchOptions.first().command;
+    }
+
+    bool isValid() const { return !name.isEmpty() && !defaultCommand().isEmpty(); }
 };
 
 // Une commande prête à exécuter — programme + arguments déjà séparés.

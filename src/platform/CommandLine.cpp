@@ -54,10 +54,15 @@ SubstitutionResult substitutePlaceholders(const QStringList &tokens,
 {
     const QFileInfo romInfo(context.romPath);
 
-    // Ordre important : %ROM_RAW% doit être traité avant %ROM%, sinon « %ROM » serait
-    // remplacé en premier et laisserait un « _RAW% » orphelin.
+    // Ordre important : les variantes longues passent AVANT %ROM%, sinon « %ROM » serait
+    // remplacé en premier et laisserait un « _RAW% » ou « RAW% » orphelin.
+    //
+    // Les deux orthographes existent réellement dans la famille EmulationStation —
+    // %ROMRAW% est celle d'un fichier de référence de 195 systèmes, %ROM_RAW% l'autre.
+    // Choisir un camp ferait échouer les lancements de l'autre, en silence.
     const QList<QPair<QString, QString>> known = {
         { QStringLiteral("%ROM_RAW%"),  context.romPath },
+        { QStringLiteral("%ROMRAW%"),   context.romPath },
         { QStringLiteral("%ROM%"),      context.romPath },
         { QStringLiteral("%BASENAME%"), romInfo.completeBaseName() },
         { QStringLiteral("%GAMEDIR%"),  romInfo.absolutePath() },

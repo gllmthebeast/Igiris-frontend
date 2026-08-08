@@ -14,7 +14,7 @@
 |---|---|---|---|---|---|---|
 | 0 | Socle de projet | `cmake --build` passe, binaire vide qui démarre | 0.1.0 | Sonnet 5 | faible | ✅ **fait** |
 | 1 | Adaptateur de plateforme + Batocera | tests sur arborescence factice | 0.2.0 | Opus 5 | **élevé** | ✅ **fait** |
-| 2 | Parser `es_systems` | CLI : liste systèmes + commandes de lancement | 0.3.0 | Sonnet 5 | moyen | à faire |
+| 2 | Parser `es_systems` | CLI : liste systèmes + commandes de lancement | 0.3.0 | Sonnet 5 | moyen | ✅ **fait** |
 | 3 | Chargeur d'export + façade `platform_key` | les 4 requêtes du §3 rejouées en C++ | 0.4.0 | Opus 5 | moyen | à faire |
 | 4 | Scanner de ROMs | rapport CLI vert / rouge / noir | 0.5.0 | Opus 5 | **élevé** | à faire |
 | 5 | IHM QML : liste + recherche | binaire affichant la liste, navigation manette | 0.6.0 | Sonnet 5 | moyen | à faire |
@@ -53,8 +53,13 @@ lot 9, et la correction sera chère. D'où l'effort élevé sur peu de code.
 `es_systems.cfg` → systèmes disponibles + **commandes de lancement lues, jamais
 hardcodées** (§1). C'est ce parser qui décide du statut *noir* (§7).
 
-**Dépendance externe** : nécessite de vrais `es_systems.cfg` de référence (§15), à récupérer
-depuis les dépôts amont Batocera et Recalbox. Aucun n'est présent sur la VM.
+**Fichiers de référence** : `~/igiris-frontend-refs/`, **hors du dépôt** (§15). Contient un
+`es_systems.xml` réel de 195 systèmes, seul échantillon obtenu au format d'exécution.
+
+> ⚠️ Le `es_systems.yml` de Batocera récupéré à côté est la **source du générateur**, pas le
+> fichier lu à l'exécution : Batocera fabrique son `es_systems.cfg` sur l'appareil. Aucun
+> `es_systems.cfg` Batocera authentique n'a pu être récupéré ; à confirmer sur du matériel
+> réel avant de considérer le parser validé pour cette distribution.
 
 ### Lot 3 — Chargeur d'export + façade `platform_key` · 0.4.0
 

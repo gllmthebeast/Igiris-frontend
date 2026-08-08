@@ -136,7 +136,7 @@ LaunchCommand BatoceraAdapter::buildLaunchCommand(const SystemEntry &system,
         return result;
 
     // La commande est celle du fichier de description, jamais un chemin reconstitué (§1).
-    const QStringList tokens = tokenizeCommand(system.command);
+    const QStringList tokens = tokenizeCommand(system.defaultCommand());
     if (tokens.isEmpty())
         return result;
 

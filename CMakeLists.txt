@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 
 # SemVer strict (CLAUDE.md §15) : cette version est la seule source de vérité.
 # Elle alimente version.h, et c'est elle qu'affiche `igiris-frontend --version`.
-project(igiris-frontend VERSION 0.2.0 LANGUAGES CXX)
+project(igiris-frontend VERSION 0.3.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -23,7 +23,16 @@ configure_file(src/version.h.in ${CMAKE_BINARY_DIR}/generated/version.h @ONLY)
 add_library(igiris-platform STATIC
     src/platform/CommandLine.cpp
     src/platform/BatoceraAdapter.cpp
+    src/platform/AdapterRegistry.cpp
 )
+
+# Lot 2 — lecture du fichier de description des systèmes. Format de la famille
+# EmulationStation : aucune connaissance de distribution ici.
+add_library(igiris-systems STATIC
+    src/systems/EsSystemsParser.cpp
+)
+target_include_directories(igiris-systems PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(igiris-systems PUBLIC Qt6::Core igiris-platform)
 target_include_directories(igiris-platform PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(igiris-platform PUBLIC Qt6::Core)
 
@@ -39,7 +48,7 @@ qt_add_qml_module(igiris-frontend
 )
 
 target_include_directories(igiris-frontend PRIVATE ${CMAKE_BINARY_DIR}/generated)
-target_link_libraries(igiris-frontend PRIVATE Qt6::Quick SQLite::SQLite3 igiris-platform)
+target_link_libraries(igiris-frontend PRIVATE Qt6::Quick SQLite::SQLite3 igiris-platform igiris-systems)
 
 # ---------------------------------------------------------------------------------------
 # Tests
@@ -62,3 +71,7 @@ add_test(NAME starts-and-reports-version
 add_executable(test-platform-adapter tests/test_platform_adapter.cpp)
 target_link_libraries(test-platform-adapter PRIVATE igiris-platform Qt6::Test)
 add_test(NAME platform-adapter COMMAND test-platform-adapter)
+
+add_executable(test-es-systems-parser tests/test_es_systems_parser.cpp)
+target_link_libraries(test-es-systems-parser PRIVATE igiris-systems Qt6::Test)
+add_test(NAME es-systems-parser COMMAND test-es-systems-parser)
