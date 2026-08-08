@@ -2,13 +2,13 @@ cmake_minimum_required(VERSION 3.22)
 
 # SemVer strict (CLAUDE.md §15) : cette version est la seule source de vérité.
 # Elle alimente version.h, et c'est elle qu'affiche `igiris-frontend --version`.
-project(igiris-frontend VERSION 0.1.0 LANGUAGES CXX)
+project(igiris-frontend VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Qml Quick)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Qml Quick Test)
 
 # Accès à l'export par l'API C de SQLite, et non par le pilote Qt SQL : le §2 impose
 # file:games.db?immutable=1 avec SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, ce qui s'exprime
@@ -18,6 +18,14 @@ find_package(SQLite3 REQUIRED)
 qt_standard_project_setup()
 
 configure_file(src/version.h.in ${CMAKE_BINARY_DIR}/generated/version.h @ONLY)
+
+# Lot 1 — l'adaptateur de plateforme, en bibliothèque pour être liable par les tests.
+add_library(igiris-platform STATIC
+    src/platform/CommandLine.cpp
+    src/platform/BatoceraAdapter.cpp
+)
+target_include_directories(igiris-platform PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(igiris-platform PUBLIC Qt6::Core)
 
 qt_add_executable(igiris-frontend src/main.cpp)
 
@@ -31,7 +39,7 @@ qt_add_qml_module(igiris-frontend
 )
 
 target_include_directories(igiris-frontend PRIVATE ${CMAKE_BINARY_DIR}/generated)
-target_link_libraries(igiris-frontend PRIVATE Qt6::Quick SQLite::SQLite3)
+target_link_libraries(igiris-frontend PRIVATE Qt6::Quick SQLite::SQLite3 igiris-platform)
 
 # ---------------------------------------------------------------------------------------
 # Tests
@@ -48,3 +56,9 @@ add_test(NAME no-distro-literals
 # Le binaire démarre et annonce ses versions, sans écran (livrable du lot 0).
 add_test(NAME starts-and-reports-version
          COMMAND igiris-frontend --version)
+
+# Lot 1 — l'adaptateur, testé sur arborescence factice (rootPrefix), donc exécutable ici
+# et pas seulement sur l'appareil cible.
+add_executable(test-platform-adapter tests/test_platform_adapter.cpp)
+target_link_libraries(test-platform-adapter PRIVATE igiris-platform Qt6::Test)
+add_test(NAME platform-adapter COMMAND test-platform-adapter)

@@ -12,8 +12,8 @@
 
 | # | Lot | Livrable vérifiable | Version | Modèle | Effort | État |
 |---|---|---|---|---|---|---|
-| 0 | Socle de projet | `cmake --build` passe, binaire vide qui démarre | 0.1.0 | Sonnet 5 | faible | **en cours** |
-| 1 | Adaptateur de plateforme + Batocera | tests sur arborescence factice | 0.2.0 | Opus 5 | **élevé** | à faire |
+| 0 | Socle de projet | `cmake --build` passe, binaire vide qui démarre | 0.1.0 | Sonnet 5 | faible | ✅ **fait** |
+| 1 | Adaptateur de plateforme + Batocera | tests sur arborescence factice | 0.2.0 | Opus 5 | **élevé** | ✅ **fait** |
 | 2 | Parser `es_systems` | CLI : liste systèmes + commandes de lancement | 0.3.0 | Sonnet 5 | moyen | à faire |
 | 3 | Chargeur d'export + façade `platform_key` | les 4 requêtes du §3 rejouées en C++ | 0.4.0 | Opus 5 | moyen | à faire |
 | 4 | Scanner de ROMs | rapport CLI vert / rouge / noir | 0.5.0 | Opus 5 | **élevé** | à faire |
