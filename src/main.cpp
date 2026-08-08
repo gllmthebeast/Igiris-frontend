@@ -18,6 +18,7 @@
 #include <QElapsedTimer>
 #include <QTimer>
 #include <QDir>
+#include <QFileInfo>
 #include <QHash>
 #include <QSet>
 #include <QUrl>
@@ -419,7 +420,29 @@ int main(int argc, char *argv[])
 
     QElapsedTimer timer;
     timer.start();
-    if (catalogue.open(QStringLiteral("data/games.db"), &catalogueError)) {
+    // Chemin de l'export : explicite, sinon recherché dans des emplacements connus.
+    // Un binaire installé ne tourne pas depuis le dépôt : « data/games.db » relatif ne
+    // vaut que pendant le développement.
+    QString exportPath;
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--export-db") == 0 && i + 1 < argc)
+            exportPath = QString::fromLocal8Bit(argv[i + 1]);
+    }
+    if (exportPath.isEmpty()) {
+        for (const QString &candidate :
+             { QStringLiteral("data/games.db"),
+               QDir::homePath() + QStringLiteral("/.local/share/igiris/games.db"),
+               QStringLiteral("/var/lib/igiris/games.db") }) {
+            if (QFileInfo::exists(candidate)) {
+                exportPath = candidate;
+                break;
+            }
+        }
+    }
+    if (exportPath.isEmpty())
+        exportPath = QStringLiteral("data/games.db"); // pour que le message cite un chemin
+
+    if (catalogue.open(exportPath, &catalogueError)) {
         const qint64 opened = timer.elapsed();
         // Les index des filtres STATIQUES sont construits ici, une fois : le §6 exige
         // qu'une combinaison de filtres reste interactive à la manette.

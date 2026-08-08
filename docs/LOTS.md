@@ -22,7 +22,7 @@
 | 7 | Fiche de jeu + lancement effectif | **un jeu se lance** | 0.8.0 | Opus 5 | moyen | ✅ **fait** |
 | 8 | Badges de langue | badges illuminé/grisé + filtres langue | 0.9.0 | Opus 5 | moyen | 🔒 **bloqué** |
 | 9 | Second adaptateur (Recalbox) | Recalbox marche **sans toucher** au reste | 0.10.0 | Opus 5 | faible en code | ⚠️ **fait — flaw corrigé** |
-| 10 | Empaquetage + démarrage | image qui boote sur le frontend | 1.0.0 | Sonnet 5 | moyen | à faire |
+| 10 | Empaquetage + démarrage | archive installable + accroche de démarrage | 1.0.0 | Sonnet 5 | moyen | ✅ **fait** |
 
 ---
 
@@ -245,6 +245,51 @@ faisait le travail de l'adaptateur — et c'est précisément ce que le test dev
 
 Déclenche la **phase 2** de la stratégie git (§16) : un fork mince par distribution
 empaquetée.
+
+#### La chaîne de démarrage réelle de Batocera 43.1
+
+Établie en montant l'image, pas d'après la documentation :
+
+```
+/etc/init.d/S31emulationstation  ->  labwc-launch (si system.es.atstartup != 0)
+    labwc (compositeur Wayland)
+        /usr/share/labwc/autostart
+            derniere ligne : /usr/bin/emulationstation-standalone > /dev/null 2>&1
+```
+
+#### Le fork de la phase 2 : **une ligne**
+
+```diff
+-/usr/bin/emulationstation-standalone > /dev/null 2>&1
++/usr/bin/igiris-frontend > /userdata/system/logs/igiris.log 2>&1
+```
+
+Le compositeur Wayland reste en place : Qt en a besoin pour afficher quoi que ce soit.
+C'est le critere du §16 — un diff d'une ligne se rebase sans douleur a chaque version de
+l'hote.
+
+> ⚠️ Ne PAS mettre `system.es.atstartup` a `0` : `labwc` ne demarrerait plus, et le
+> frontend n'aurait plus de compositeur, donc plus d'affichage.
+
+#### Livrable
+
+`cpack -G ZIP` produit `igiris-frontend-1.0.0-aarch64.zip` (0,3 Mo) : le binaire, les
+outils, la documentation et `packaging/`. **Pas l'export** — c'est un artefact (§15).
+
+Le QML est compile DANS le binaire : il n'y a rien a installer a cote, ce qui est
+precisement ce qui rend l'integration si mince.
+
+Verifie : le binaire extrait tourne **hors du depot** (`--version`, `--systems` sur les
+224 systemes reels), et signale explicitement l'export manquant au lieu de demarrer vide.
+Le `sed` de `install-on-device.sh` a ete essaye sur le contenu reel d'`autostart` — une
+ligne remplacee, `batocera-mouse` preserve.
+
+#### Ce qui reste hors de portee d'ici
+
+Construire une **image** demande Buildroot et l'activation, dans le `defconfig` de chaque
+cible, de Qt6 (Core/Gui/Qml/Quick), du plugin de plateforme **wayland** et de `libsqlite3`.
+C'est le vrai travail d'integration systeme, propre a chaque distribution, et il se fait
+dans le fork — pas dans ce depot.
 
 ---
 

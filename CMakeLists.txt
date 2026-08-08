@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 
 # SemVer strict (CLAUDE.md §15) : cette version est la seule source de vérité.
 # Elle alimente version.h, et c'est elle qu'affiche `igiris-frontend --version`.
-project(igiris-frontend VERSION 0.10.0 LANGUAGES CXX)
+project(igiris-frontend VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -78,6 +78,37 @@ qt_add_qml_module(igiris-frontend
 
 target_include_directories(igiris-frontend PRIVATE ${CMAKE_BINARY_DIR}/generated)
 target_link_libraries(igiris-frontend PRIVATE Qt6::Quick SQLite::SQLite3 igiris-platform igiris-catalog igiris-scan igiris-ui)
+
+# ---------------------------------------------------------------------------------------
+# Installation et empaquetage (lot 10)
+# ---------------------------------------------------------------------------------------
+#
+# Le QML est compilé DANS le binaire (qt_add_qml_module + ressources) : il n'y a donc rien
+# à installer à côté. C'est ce qui rend l'intégration au démarrage aussi mince — une ligne
+# à changer, un fichier à copier (§16).
+include(GNUInstallDirs)
+
+install(TARGETS igiris-frontend RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(FILES tools/fetch-export.sh tools/probe.py
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/igiris-frontend/tools
+        PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
+                    WORLD_READ WORLD_EXECUTE)
+install(DIRECTORY packaging/ DESTINATION ${CMAKE_INSTALL_DATADIR}/igiris-frontend/packaging)
+install(FILES docs/LOTS.md CLAUDE.md
+        DESTINATION ${CMAKE_INSTALL_DOCDIR})
+
+# §15 : « Itérations livrées sous forme d'archives zip. »
+set(CPACK_PACKAGE_NAME igiris-frontend)
+set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+set(CPACK_PACKAGE_FILE_NAME
+    "igiris-frontend-${PROJECT_VERSION}-${CMAKE_SYSTEM_PROCESSOR}")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
+    "Frontend de jeux unifie pour distributions de retrogaming")
+set(CPACK_GENERATOR "ZIP;TGZ")
+set(CPACK_SOURCE_GENERATOR "")
+# L'export est un ARTEFACT : jamais dans la livraison (§15).
+set(CPACK_PACKAGE_IGNORE_FILES "/build/;/data/;/.git/")
+include(CPack)
 
 # ---------------------------------------------------------------------------------------
 # Tests
