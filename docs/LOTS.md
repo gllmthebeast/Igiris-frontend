@@ -19,7 +19,7 @@
 | 4 | Scanner de ROMs | rapport CLI vert / rouge / noir | 0.5.0 | Opus 5 | **élevé** | ✅ **fait** |
 | 5 | IHM QML : liste + recherche | binaire affichant la liste, navigation manette | 0.6.0 | Sonnet 5 | moyen | ✅ **fait** |
 | 6 | Filtres statiques puis dynamiques | filtres combinables, interactifs | 0.7.0 | Sonnet 5 | moyen | ✅ **fait** |
-| 7 | Fiche de jeu + lancement effectif | **un jeu se lance** | 0.8.0 | Opus 5 | moyen | à faire |
+| 7 | Fiche de jeu + lancement effectif | **un jeu se lance** | 0.8.0 | Opus 5 | moyen | ✅ **fait** |
 | 8 | Badges de langue | badges illuminé/grisé + filtres langue | 0.9.0 | Opus 5 | moyen | 🔒 **bloqué** |
 | 9 | Second adaptateur (Recalbox) | Recalbox marche **sans toucher** au reste | 0.10.0 | Opus 5 | faible en code | à faire |
 | 10 | Empaquetage + démarrage | image qui boote sur le frontend | 1.0.0 | Sonnet 5 | moyen | à faire |
@@ -143,27 +143,44 @@ combinaisons de filtres instantanées — ce qu'exige le §6.
 **Le vrai jalon** : à la fin de ce lot, la boucle est bouclée — on voit ses jeux, on en
 choisit un, il se lance. Tout ce qui suit est de l'enrichissement.
 
-> ⚠️ **Prérequis découvert au lot 3, sur le vrai `es_systems.cfg` de Batocera 43.1.**
->
-> La commande de lancement réelle est la même pour tous les systèmes :
-> ```
-> emulatorlauncher %CONTROLLERSCONFIG% -system %SYSTEM% -rom %ROM% \
->                  -gameinfoxml %GAMEINFOXML% -systemname %SYSTEMNAME%
-> ```
-> Sur 5 placeholders, le lot 1 n'en gère que **2** (`%ROM%`, `%SYSTEM%`). Comme `launch()`
-> refuse de partir sur un placeholder inconnu, **aucun jeu ne se lancerait** : le refus
-> porterait sur 100 % des systèmes.
->
-> Les trois manquants sont produits **à l'exécution par EmulationStation**, que ce projet
-> remplace — c'est donc à nous de les fabriquer :
-> - `%CONTROLLERSCONFIG%` — description des manettes branchées ;
-> - `%GAMEINFOXML%` — fiche du jeu passée à l'émulateur ;
-> - `%SYSTEMNAME%` — nom de système transmis au launcher.
->
-> Leur sémantique exacte est **à établir depuis les sources de `batocera-emulationstation`
-> avant d'écrire quoi que ce soit** : les inventer produirait des lancements qui échouent
-> de façon obscure. Le refus actuel est le bon comportement en attendant — il est bruyant,
-> pas silencieux.
+**Bloquant du lot 3 : levé.** La sémantique des trois placeholders manquants a été établie
+dans les sources livrées, pas devinée :
+
+| Placeholder | Source | Valeur |
+|---|---|---|
+| `%SYSTEMNAME%` | `FileData.cpp:571` | le **fullname** du système, pas sa clé |
+| `%GAMEINFOXML%` | `FileData.cpp:580-585` | chemin d'un XML temporaire, **chaîne vide** s'il n'est pas produit |
+| `%CONTROLLERSCONFIG%` | `InputManager.cpp:1297` | `-p1index N -p1guid … -p1name "…"` par manette, **vide** si aucune |
+
+Et surtout, la preuve que la commande produite est acceptée, lue dans l'`emulatorlauncher`
+de l'image 43.1 (`configgen/emulatorlauncher.py:638-651`) :
+
+```python
+parser.add_argument("-system", required=True)
+parser.add_argument("-rom",    required=True)
+parser.add_argument("-gameinfoxml", nargs='?', default='/dev/null', required=False)
+parser.add_argument("-systemname",  required=False)
+```
+
+`nargs='?'` : un `-gameinfoxml` **sans valeur est prévu par conception**. Seuls `-system` et
+`-rom` sont obligatoires ; tous les arguments de manettes sont optionnels.
+
+**Différence assumée avec l'amont** : EmulationStation construit UNE chaîne confiée à un
+shell, et échappe donc ses valeurs. Ici les arguments restent séparés jusqu'à `QProcess` :
+reproduire cet échappement ferait entrer les guillemets DANS l'argument. Corollaire, un
+jeton réduit à un placeholder vide est **supprimé** — le garder passerait un argument vide,
+ce que l'amont n'a jamais puisque le vide disparaît dans sa chaîne.
+
+> ⚠️ **`%CONTROLLERSCONFIG%` reste vide** : la capacité `ControllerMapping` n'est pas
+> déclarée, faute d'énumération des manettes (Qt6 ne fournit plus QtGamepad ; il faudra
+> SDL). L'émulateur retombera sur sa configuration par défaut. La fiche **le dit**, comme
+> l'exige le §1 — elle ne laisse pas croire que tout est transmis.
+
+> ⚠️ **`is_preferred` ne discrimine pas.** L'export le marque sur **18 116 des 18 555
+> lignes** (97,6 %), et **3 932 jeux** ont plusieurs plateformes « élues ». Le §7 prévoit
+> de proposer par défaut le système `is_preferred` : c'est impossible en l'état. Le défaut
+> retenu est le **premier système jouable** (vert, puis meilleur `emu_score`). **À signaler
+> au backend** — c'est une anomalie de données, pas un choix d'affichage.
 
 ### Lot 8 — Badges de langue · 0.9.0 · 🔒 BLOQUÉ
 

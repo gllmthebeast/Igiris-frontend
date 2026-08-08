@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 
 # SemVer strict (CLAUDE.md §15) : cette version est la seule source de vérité.
 # Elle alimente version.h, et c'est elle qu'affiche `igiris-frontend --version`.
-project(igiris-frontend VERSION 0.7.0 LANGUAGES CXX)
+project(igiris-frontend VERSION 0.8.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -56,9 +56,9 @@ target_link_libraries(igiris-scan PUBLIC Qt6::Core igiris-catalog ZLIB::ZLIB SQL
 
 # Lot 5 — le modèle exposé à QML. Le §12 veut très peu de C++ : cette couche expose les
 # données et rien d'autre.
-add_library(igiris-ui STATIC src/ui/GameListModel.cpp)
+add_library(igiris-ui STATIC src/ui/GameListModel.cpp src/ui/GameDetailModel.cpp)
 target_include_directories(igiris-ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(igiris-ui PUBLIC Qt6::Core igiris-catalog)
+target_link_libraries(igiris-ui PUBLIC Qt6::Core igiris-catalog igiris-platform)
 
 qt_add_executable(igiris-frontend src/main.cpp)
 
@@ -68,7 +68,7 @@ qt_add_qml_module(igiris-frontend
     # Fixé explicitement : Qt 6.4 place les ressources sous « / », Qt 6.5 sous « /qt/qml ».
     # Sans ce réglage, le chemin qrc du main.cpp dépendrait de la version de Qt du système.
     RESOURCE_PREFIX "/qt/qml"
-    QML_FILES qml/Main.qml qml/FilterCell.qml
+    QML_FILES qml/Main.qml qml/FilterCell.qml qml/GameDetail.qml
 )
 
 target_include_directories(igiris-frontend PRIVATE ${CMAKE_BINARY_DIR}/generated)
@@ -117,3 +117,8 @@ target_link_libraries(test-game-list-model PRIVATE igiris-ui Qt6::Test)
 add_test(NAME game-list-model COMMAND test-game-list-model)
 # Ce test construit une QGuiApplication : sans écran, il lui faut la plateforme offscreen.
 set_tests_properties(game-list-model PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(test-game-detail-model tests/test_game_detail_model.cpp)
+target_link_libraries(test-game-detail-model PRIVATE igiris-ui Qt6::Test)
+add_test(NAME game-detail-model COMMAND test-game-detail-model)
+set_tests_properties(game-detail-model PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

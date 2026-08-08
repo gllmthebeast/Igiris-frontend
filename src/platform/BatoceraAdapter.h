@@ -31,11 +31,11 @@ public:
 
     QStringList romDirectories() const override;
 
-    LaunchCommand buildLaunchCommand(const SystemEntry &system,
-                                     const QString &romPath) const override;
+    LaunchCommand buildLaunchCommand(const SystemEntry &system, const QString &romPath,
+                                     const LaunchDetails &details) const override;
 
     bool launch(const SystemEntry &system, const QString &romPath,
-                QString *error) const override;
+                const LaunchDetails &details, QString *error) const override;
 
 private:
     QString absolutePath(const QString &relative) const;

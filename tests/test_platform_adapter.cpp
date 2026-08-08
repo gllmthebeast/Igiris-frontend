@@ -32,7 +32,7 @@ QString realisticCommand()
 {
     return QStringLiteral(
         "/usr/bin/emulatorlauncher %CONTROLLERSCONFIG% -system %SYSTEM% -rom %ROM% "
-        "-emulator libretro -core snes9x");
+        "-gameinfoxml %GAMEINFOXML% -systemname %SYSTEMNAME%");
 }
 
 } // namespace
@@ -53,6 +53,9 @@ private slots:
     void substitute_bothRomRawSpellings();
     void substitute_flagsUnknownPlaceholderAndKeepsItVerbatim();
     void substitute_awkwardFilenameStaysOneArgument();
+    void substitute_systemNameIsTheLabelNotTheKey();
+    void substitute_emptyValuedPlaceholderDropsTheToken();
+    void substitute_realBatoceraCommandResolvesEntirely();
 
     // ------------------------------------------------- (1) fichier des systèmes
     void systemsFile_prefersUserOverride();
@@ -150,9 +153,8 @@ void TestPlatformAdapter::substitute_flagsUnknownPlaceholderAndKeepsItVerbatim()
     const auto out    = substitutePlaceholders(
         tokens, LaunchContext{ QStringLiteral("/roms/snes/a.sfc"), QStringLiteral("snes") });
 
-    // %CONTROLLERSCONFIG% n'est pas géré au lot 1 : il doit être SIGNALÉ, pas avalé.
-    QCOMPARE(out.unresolved, QStringList{ QStringLiteral("%CONTROLLERSCONFIG%") });
-    QVERIFY(out.tokens.contains(QStringLiteral("%CONTROLLERSCONFIG%")));
+    // Tous les placeholders de la vraie commande Batocera sont désormais connus.
+    QVERIFY2(out.unresolved.isEmpty(), qPrintable(out.unresolved.join(u' ')));
 }
 
 void TestPlatformAdapter::substitute_awkwardFilenameStaysOneArgument()
@@ -165,6 +167,61 @@ void TestPlatformAdapter::substitute_awkwardFilenameStaysOneArgument()
 
     QCOMPARE(out.tokens.size(), 2);
     QCOMPARE(out.tokens.at(1), rom); // un seul argument, aucun échappement nécessaire
+}
+
+void TestPlatformAdapter::substitute_systemNameIsTheLabelNotTheKey()
+{
+    // Établi dans les sources de batocera-emulationstation : %SYSTEMNAME% reçoit le
+    // FULLNAME du système, pas sa clé. Les confondre passerait « snes » au lanceur là où
+    // il attend « Super Nintendo Entertainment System ».
+    LaunchContext context;
+    context.romPath        = QStringLiteral("/roms/snes/a.sfc");
+    context.systemName     = QStringLiteral("snes");
+    context.systemFullName = QStringLiteral("Super Nintendo Entertainment System");
+
+    const auto out = substitutePlaceholders(
+        QStringList{ QStringLiteral("%SYSTEM%"), QStringLiteral("%SYSTEMNAME%") }, context);
+
+    QCOMPARE(out.tokens.at(0), QStringLiteral("snes"));
+    QCOMPARE(out.tokens.at(1), QStringLiteral("Super Nintendo Entertainment System"));
+}
+
+void TestPlatformAdapter::substitute_emptyValuedPlaceholderDropsTheToken()
+{
+    // %CONTROLLERSCONFIG% est vide quand aucune manette n'est configurée — c'est le
+    // comportement amont. Mais l'amont assemble une CHAÎNE, où le vide disparaît ; ici
+    // les arguments sont séparés, donc un jeton vide deviendrait un argument vide passé
+    // au lanceur. Il doit être supprimé, et signalé.
+    LaunchContext context;
+    context.romPath = QStringLiteral("/roms/a.sfc");
+
+    const auto out = substitutePlaceholders(
+        QStringList{ QStringLiteral("/bin/run"), QStringLiteral("%CONTROLLERSCONFIG%"),
+                     QStringLiteral("-rom"), QStringLiteral("%ROM%") },
+        context);
+
+    QCOMPARE(out.tokens, (QStringList{ "/bin/run", "-rom", "/roms/a.sfc" }));
+    QCOMPARE(out.droppedEmpty, QStringList{ QStringLiteral("%CONTROLLERSCONFIG%") });
+    QVERIFY(out.unresolved.isEmpty());
+}
+
+void TestPlatformAdapter::substitute_realBatoceraCommandResolvesEntirely()
+{
+    // La commande RÉELLE de Batocera 43.1, identique pour ses 224 systèmes.
+    const auto tokens = tokenizeCommand(realisticCommand());
+
+    LaunchContext context;
+    context.romPath        = QStringLiteral("/userdata/roms/snes/jeu.sfc");
+    context.systemName     = QStringLiteral("snes");
+    context.systemFullName = QStringLiteral("Super Nintendo");
+
+    const auto out = substitutePlaceholders(tokens, context);
+
+    QVERIFY2(out.unresolved.isEmpty(), qPrintable(out.unresolved.join(u' ')));
+    // %CONTROLLERSCONFIG% et %GAMEINFOXML% sont vides : leurs jetons disparaissent, et le
+    // « -gameinfoxml » resté seul est le comportement de l'amont.
+    QVERIFY(out.tokens.contains(QStringLiteral("/userdata/roms/snes/jeu.sfc")));
+    QVERIFY(!out.tokens.contains(QString()));
 }
 
 // --------------------------------------------------- (1) fichier des systèmes
@@ -274,7 +331,7 @@ void TestPlatformAdapter::launch_reallyRunsTheCommand()
     system.launchOptions = { { QStringLiteral("test"), QStringLiteral("/usr/bin/touch \"%ROM%.lance\"") } };
 
     QString error;
-    QVERIFY2(BatoceraAdapter(dir.path()).launch(system, rom, &error),
+    QVERIFY2(BatoceraAdapter(dir.path()).launch(system, rom, {}, &error),
              qPrintable(error));
     QVERIFY(error.isEmpty());
 
@@ -291,11 +348,12 @@ void TestPlatformAdapter::launch_refusesUnresolvedPlaceholder()
 
     SystemEntry system;
     system.name    = QStringLiteral("snes");
-    system.launchOptions = { { QStringLiteral("test"), realisticCommand() } }; // contient %CONTROLLERSCONFIG%
+    system.launchOptions = { { QStringLiteral("test"),
+                               QStringLiteral("/bin/true %ROM% %INVENTE%") } };
 
     QString error;
-    QVERIFY(!BatoceraAdapter(dir.path()).launch(system, rom, &error));
-    QVERIFY(error.contains(QStringLiteral("%CONTROLLERSCONFIG%")));
+    QVERIFY(!BatoceraAdapter(dir.path()).launch(system, rom, {}, &error));
+    QVERIFY(error.contains(QStringLiteral("%INVENTE%")));
 }
 
 void TestPlatformAdapter::launch_refusesMissingRom()
@@ -308,7 +366,7 @@ void TestPlatformAdapter::launch_refusesMissingRom()
     system.launchOptions = { { QStringLiteral("test"), QStringLiteral("/bin/true %ROM%") } };
 
     QString error;
-    QVERIFY(!BatoceraAdapter(dir.path()).launch(system, dir.filePath("absente.sfc"), &error));
+    QVERIFY(!BatoceraAdapter(dir.path()).launch(system, dir.filePath("absente.sfc"), {}, &error));
     QVERIFY(error.contains(QStringLiteral("introuvable")));
 }
 
@@ -317,7 +375,7 @@ void TestPlatformAdapter::launch_errorMessageIsNeverEmpty()
     // §15 : erreurs verbatim. Un échec muet est un bug.
     SystemEntry invalid;
     QString     error;
-    QVERIFY(!BatoceraAdapter(QStringLiteral("/")).launch(invalid, QStringLiteral("/x"), &error));
+    QVERIFY(!BatoceraAdapter(QStringLiteral("/")).launch(invalid, QStringLiteral("/x"), {}, &error));
     QVERIFY(!error.isEmpty());
 }
 

@@ -204,9 +204,13 @@ Window {
 
         highlight: Rectangle { color: theme.selection }
 
+        Keys.onReturnPressed: root.openDetail()
+        Keys.onEnterPressed: root.openDetail()
+
         delegate: Item {
             required property string title
             required property int rating
+            required property string gameKey
             required property int index
 
             width: ListView.view.width
@@ -239,6 +243,43 @@ Window {
                 color: theme.dim
                 font.pixelSize: 20
             }
+        }
+    }
+
+    function openDetail() {
+        if (list.currentIndex < 0 || games.visibleCount === 0)
+            return
+        detail.setGame(list.currentItem.gameKey)
+        detailSheet.lastMessage = ""
+        detailSheet.visible = true
+        detailSheet.forceActiveFocus()
+    }
+
+    // Un jeu préréglé en ligne de commande ouvre directement sa fiche : c'est ce qui rend
+    // la fiche capturable sans écran.
+    Component.onCompleted: {
+        if (detail.gameKey.length > 0) {
+            detailSheet.visible = true
+            detailSheet.forceActiveFocus()
+        }
+    }
+
+    // ------------------------------------------------------------------- fiche
+    GameDetail {
+        id: detailSheet
+
+        anchors.fill: parent
+        visible: false
+
+        background: theme.background
+        surface: theme.surface
+        selection: theme.selection
+        textColor: theme.text
+        dimColor: theme.dim
+
+        onClosed: {
+            visible = false
+            list.forceActiveFocus()
         }
     }
 

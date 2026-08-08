@@ -4,8 +4,13 @@
 // des systèmes.
 //
 // Ces fonctions ne connaissent aucune distribution : elles traitent la convention
-// EmulationStation, qui est commune à toute la famille (§1). Elles vivent malgré tout
-// sous platform/ parce qu'elles n'ont de sens que pour les adaptateurs.
+// EmulationStation, commune à toute la famille (§1).
+//
+// ⚠️ Différence ASSUMÉE avec EmulationStation amont : celui-ci construit UNE chaîne qu'il
+// confie ensuite à un shell, et il échappe donc ses valeurs (guillemets autour des
+// chemins). Ici, programme et arguments restent séparés jusqu'à QProcess : reproduire cet
+// échappement ferait entrer les guillemets DANS l'argument, et l'émulateur recevrait un
+// chemin littéralement entouré de guillemets. On substitue donc les valeurs brutes.
 
 #include <QString>
 #include <QStringList>
@@ -17,21 +22,30 @@ namespace igiris::platform {
 QStringList tokenizeCommand(const QString &command);
 
 // Contexte de substitution des placeholders de la convention EmulationStation.
+//
+// Les valeurs vides sont légitimes : elles correspondent à ce que fait l'amont quand
+// l'information n'existe pas (aucune manette branchée, pas de fiche XML produite).
 struct LaunchContext {
-    QString romPath;    // chemin complet de la ROM
-    QString systemName; // nom de système local
+    QString romPath;          // %ROM%, %ROM_RAW%, %ROMRAW%
+    QString systemName;       // %SYSTEM%   — clé locale, « snes »
+    QString systemFullName;   // %SYSTEMNAME% — libellé, « Super Nintendo… »
+    QString gameName;         // %GAMENAME%
+    QString homePath;         // %HOME%
+    QString gameInfoXmlPath;  // %GAMEINFOXML% — vide = non produite, comme l'amont
+    QString controllersConfig; // %CONTROLLERSCONFIG% — vide = aucune manette transmise
 };
 
 struct SubstitutionResult {
     QStringList tokens;
     QStringList unresolved; // placeholders inconnus, laissés verbatim dans les jetons
+
+    // Jetons supprimés parce qu'un placeholder connu s'est résolu en RIEN.
+    // Sans cette suppression, « %CONTROLLERSCONFIG% » deviendrait un argument VIDE passé
+    // au lanceur — ce que l'amont n'a jamais : il assemble une chaîne, où le vide
+    // disparaît de lui-même.
+    QStringList droppedEmpty;
 };
 
-// Remplace %ROM%, %ROM_RAW%, %BASENAME%, %GAMEDIR% et %SYSTEM% dans chaque jeton.
-//
-// Un placeholder inconnu n'est PAS supprimé : il reste tel quel et son nom est remonté
-// dans `unresolved`. Le supprimer silencieusement fabriquerait une commande plausible mais
-// fausse, et l'échec serait attribué à l'émulateur.
 SubstitutionResult substitutePlaceholders(const QStringList &tokens,
                                           const LaunchContext &context);
 

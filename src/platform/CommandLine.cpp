@@ -57,16 +57,21 @@ SubstitutionResult substitutePlaceholders(const QStringList &tokens,
     // Ordre important : les variantes longues passent AVANT %ROM%, sinon « %ROM » serait
     // remplacé en premier et laisserait un « _RAW% » ou « RAW% » orphelin.
     //
-    // Les deux orthographes existent réellement dans la famille EmulationStation —
-    // %ROMRAW% est celle d'un fichier de référence de 195 systèmes, %ROM_RAW% l'autre.
-    // Choisir un camp ferait échouer les lancements de l'autre, en silence.
+    // Les deux orthographes de ROM_RAW existent réellement dans la famille
+    // EmulationStation — %ROMRAW% dans un fichier de référence de 195 systèmes, %ROM_RAW%
+    // ailleurs. Choisir un camp ferait échouer les lancements de l'autre, en silence.
     const QList<QPair<QString, QString>> known = {
-        { QStringLiteral("%ROM_RAW%"),  context.romPath },
-        { QStringLiteral("%ROMRAW%"),   context.romPath },
-        { QStringLiteral("%ROM%"),      context.romPath },
+        { QStringLiteral("%CONTROLLERSCONFIG%"), context.controllersConfig },
+        { QStringLiteral("%GAMEINFOXML%"), context.gameInfoXmlPath },
+        { QStringLiteral("%SYSTEMNAME%"), context.systemFullName },
+        { QStringLiteral("%GAMENAME%"), context.gameName },
         { QStringLiteral("%BASENAME%"), romInfo.completeBaseName() },
-        { QStringLiteral("%GAMEDIR%"),  romInfo.absolutePath() },
-        { QStringLiteral("%SYSTEM%"),   context.systemName },
+        { QStringLiteral("%GAMEDIR%"), romInfo.absolutePath() },
+        { QStringLiteral("%ROM_RAW%"), context.romPath },
+        { QStringLiteral("%ROMRAW%"), context.romPath },
+        { QStringLiteral("%ROM%"), context.romPath },
+        { QStringLiteral("%SYSTEM%"), context.systemName },
+        { QStringLiteral("%HOME%"), context.homePath },
     };
 
     static const QRegularExpression placeholderRe(QStringLiteral("%[A-Z0-9_]+%"));
@@ -75,7 +80,9 @@ SubstitutionResult substitutePlaceholders(const QStringList &tokens,
     result.tokens.reserve(tokens.size());
 
     for (const QString &token : tokens) {
-        QString substituted = token;
+        QString    substituted = token;
+        const bool hadPlaceholder = placeholderRe.match(token).hasMatch();
+
         for (const auto &[needle, value] : known)
             substituted.replace(needle, value);
 
@@ -85,6 +92,14 @@ SubstitutionResult substitutePlaceholders(const QStringList &tokens,
             const QString name = it.next().captured(0);
             if (!result.unresolved.contains(name))
                 result.unresolved.append(name);
+        }
+
+        // Un jeton qui n'était QUE des placeholders et qui se résout en rien disparaît :
+        // le garder produirait un argument vide, que l'amont n'a jamais puisqu'il
+        // assemble une chaîne.
+        if (hadPlaceholder && substituted.isEmpty()) {
+            result.droppedEmpty.append(token);
+            continue;
         }
 
         result.tokens.append(substituted);

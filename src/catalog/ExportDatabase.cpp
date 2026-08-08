@@ -289,6 +289,32 @@ QList<Game> ExportDatabase::allGames() const
     return games;
 }
 
+std::optional<Game> ExportDatabase::gameByKey(const QString &gameKey) const
+{
+    if (!m_db)
+        return std::nullopt;
+
+    sqlite3_stmt *stmt = prepare(m_db, QStringLiteral("SELECT game_key, title, year, "
+                                                      "rating, search_key FROM exp_game "
+                                                      "WHERE game_key = ?"));
+    if (!stmt)
+        return std::nullopt;
+    bindText(stmt, 1, gameKey);
+
+    std::optional<Game> result;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        Game game;
+        game.gameKey   = columnText(stmt, 0);
+        game.title     = columnText(stmt, 1);
+        game.year      = sqlite3_column_int(stmt, 2);
+        game.rating    = sqlite3_column_int(stmt, 3);
+        game.searchKey = columnText(stmt, 4);
+        result         = game;
+    }
+    sqlite3_finalize(stmt);
+    return result;
+}
+
 QList<GamePlatform> ExportDatabase::platformsForGame(const QString &gameKey) const
 {
     QList<GamePlatform> platforms;

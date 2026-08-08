@@ -27,6 +27,7 @@
 #include "scan/ScanCache.h"
 #include "platform/AdapterRegistry.h"
 #include "systems/EsSystemsParser.h"
+#include "ui/GameDetailModel.h"
 #include "ui/GameListModel.h"
 #include "version.h"
 
@@ -372,6 +373,10 @@ int main(int argc, char *argv[])
     QString screenshotPath;
     QString initialFilter;
     for (int i = 1; i < argc; ++i) {
+        // L'aperçu de lancement n'ouvre aucune fenêtre, mais il construit une
+        // QGuiApplication : sans écran, il lui faut la plateforme offscreen.
+        if (std::strcmp(argv[i], "--launch-preview") == 0)
+            qputenv("QT_QPA_PLATFORM", "offscreen");
         if (std::strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) {
             screenshotPath = QString::fromLocal8Bit(argv[i + 1]);
             if (i + 2 < argc)
@@ -389,7 +394,28 @@ int main(int argc, char *argv[])
     // performance : on mesure donc ce que coûte l'alimentation du modèle.
     igiris::catalog::ExportDatabase catalogue;
     igiris::ui::GameListModel       games;
+    igiris::ui::GameDetailModel     detail;
     QString                         catalogueError;
+
+    // L'adaptateur : détecté sur la machine, ou forcé sur une racine factice (image
+    // montée, clone de référence) via --root. C'est ce qui rend la fiche de jeu
+    // vérifiable ici (§15).
+    QString rootPrefix = QStringLiteral("/");
+    QString systemsFileOverride;
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--root") == 0 && i + 1 < argc)
+            rootPrefix = QString::fromLocal8Bit(argv[i + 1]);
+        else if (std::strcmp(argv[i], "--systems-file") == 0 && i + 1 < argc)
+            systemsFileOverride = QString::fromLocal8Bit(argv[i + 1]);
+    }
+    QString forcedDistro;
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--distro") == 0 && i + 1 < argc)
+            forcedDistro = QString::fromLocal8Bit(argv[i + 1]);
+    }
+    const auto adapter = forcedDistro.isEmpty()
+                             ? igiris::platform::detectAdapter(rootPrefix)
+                             : igiris::platform::adapterById(forcedDistro, rootPrefix);
 
     QElapsedTimer timer;
     timer.start();
@@ -429,6 +455,15 @@ int main(int argc, char *argv[])
 
             const QStringList owned = report.ownedGameKeys();
             games.setOwnedGameKeys(QSet<QString>(owned.cbegin(), owned.cend()));
+
+            // La fiche a besoin du CHEMIN de chaque ROM, pas seulement de la liste des
+            // jeux possédés : c'est lui qui part dans la commande de lancement.
+            QHash<QString, QString> ownedRoms;
+            for (const auto &rom : report.identified)
+                ownedRoms.insert(rom.gameKey + QLatin1Char('\x1f') + rom.platformKey,
+                                 rom.path);
+            detail.setOwnedRoms(ownedRoms);
+
             std::printf("scan local : %d fichiers · %lld jeux possédés\n", report.filesSeen,
                         static_cast<long long>(owned.size()));
         }
@@ -459,8 +494,82 @@ int main(int argc, char *argv[])
     std::printf("filtres : %d / %d jeux affichés\n", games.visibleCount(),
                 games.totalCount());
 
+    // Systèmes réellement présents : c'est le fichier de description qui tranche, et donc
+    // lui qui décide du statut noir (§1, §7).
+    detail.setCatalogue(&catalogue);
+    detail.setAdapter(adapter.get());
+
+    QString systemsPath = systemsFileOverride;
+    if (systemsPath.isEmpty() && adapter)
+        systemsPath = adapter->systemsFilePath();
+
+    if (!systemsPath.isEmpty()) {
+        const auto parsed = igiris::systems::parseEsSystemsFile(systemsPath);
+        if (parsed.ok()) {
+            QHash<QString, igiris::platform::SystemEntry> byName;
+            for (const auto &system : parsed.systems)
+                byName.insert(system.name, system);
+            detail.setLocalSystems(byName);
+            std::printf("systèmes locaux : %lld (%s)\n",
+                        static_cast<long long>(byName.size()), qPrintable(systemsPath));
+        } else {
+            std::fprintf(stderr, "⚠ %s\n", qPrintable(parsed.error.message));
+        }
+    } else {
+        std::fprintf(stderr, "⚠ aucun fichier de description des systèmes : statuts et "
+                             "lancement indisponibles\n");
+    }
+
+    // Ouvrir directement la fiche d'un jeu, pour la capture comme pour l'inspection.
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--open-detail") != 0 || i + 1 >= argc)
+            continue;
+        const auto found = catalogue.searchByName(QString::fromLocal8Bit(argv[i + 1]), 1);
+        if (!found.isEmpty())
+            detail.setGame(found.first().gameKey);
+    }
+
+    // Livrable du lot 7, vérifiable sans appareil : la fiche d'un jeu, ses statuts, et la
+    // commande EXACTE qui serait exécutée — arguments séparés, un par ligne.
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--launch-preview") != 0 || i + 1 >= argc)
+            continue;
+
+        const auto found = catalogue.searchByName(QString::fromLocal8Bit(argv[i + 1]), 1);
+        if (found.isEmpty()) {
+            std::fprintf(stderr, "✗ aucun jeu ne correspond\n");
+            return 1;
+        }
+
+        detail.setGame(found.first().gameKey);
+        std::printf("\n%s\n", qPrintable(detail.title()));
+
+        const QString warning = detail.launchWarning();
+        if (!warning.isEmpty())
+            std::printf("⚠ %s\n", qPrintable(warning));
+
+        static const char *const marks[] = { "⬛", "🟥", "🟩" };
+        for (int row = 0; row < detail.rowCount(); ++row) {
+            const QModelIndex index = detail.index(row, 0);
+            const int status = index.data(igiris::ui::GameDetailModel::StatusRole).toInt();
+            std::printf("\n  %s %-14s %-28s emu %3d%s\n", marks[status],
+                        qPrintable(index.data(igiris::ui::GameDetailModel::PlatformKeyRole)
+                                       .toString()),
+                        qPrintable(index.data(igiris::ui::GameDetailModel::DisplayNameRole)
+                                       .toString()),
+                        index.data(igiris::ui::GameDetailModel::EmuScoreRole).toInt(),
+                        index.data(igiris::ui::GameDetailModel::DefaultChoiceRole).toBool()
+                            ? "  ← proposé par défaut"
+                            : "");
+            if (status == igiris::ui::GameDetailModel::Green)
+                std::printf("      %s\n", qPrintable(detail.commandPreview(row)));
+        }
+        return 0;
+    }
+
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("games"), &games);
+    engine.rootContext()->setContextProperty(QStringLiteral("detail"), &detail);
 
     // CLAUDE.md §15 : « Erreurs remontées verbatim, jamais avalées ni reformulées. »
     // Un échec de création d'objet QML doit tuer le processus avec un code non nul,

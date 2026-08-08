@@ -14,6 +14,13 @@ std::unique_ptr<PlatformAdapter> detectAdapter(const QString &rootPrefix)
     return nullptr;
 }
 
+std::unique_ptr<PlatformAdapter> adapterById(const QString &id, const QString &rootPrefix)
+{
+    if (id == QLatin1String("batocera"))
+        return std::make_unique<BatoceraAdapter>(rootPrefix);
+    return nullptr;
+}
+
 QStringList knownAdapterIds()
 {
     return { QStringLiteral("batocera") };

@@ -22,6 +22,11 @@ namespace igiris::platform {
 // nullptr si aucune ne correspond — cas normal sur une machine de développement.
 std::unique_ptr<PlatformAdapter> detectAdapter(const QString &rootPrefix = QStringLiteral("/"));
 
+// Adaptateur FORCÉ par identifiant, sans détection. Sert aux clones en lecture seule des
+// distributions cibles (§15) : on travaille sur l'arborescence d'une autre distribution
+// que celle de la machine, ce que la détection refuserait à juste titre.
+std::unique_ptr<PlatformAdapter> adapterById(const QString &id, const QString &rootPrefix);
+
 // Identifiants des distributions connues, pour les diagnostics.
 QStringList knownAdapterIds();
 

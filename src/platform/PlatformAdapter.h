@@ -29,6 +29,11 @@ enum class Capability : quint32 {
     RomDirectories    = 1u << 1, // sait localiser les dossiers de ROMs
     Launch            = 1u << 2, // sait lancer un jeu
     PerSystemEmulator = 1u << 3, // la commande accepte un choix d'émulateur explicite
+    // La configuration des manettes est transmise à l'émulateur (%CONTROLLERSCONFIG%).
+    // NON déclarée aujourd'hui : sans elle, l'émulateur retombe sur sa configuration par
+    // défaut. Le §1 exige qu'une distribution DISE ce qu'elle ne sait pas faire, plutôt
+    // que de laisser croire.
+    ControllerMapping = 1u << 4,
 };
 Q_DECLARE_FLAGS(Capabilities, Capability)
 Q_DECLARE_OPERATORS_FOR_FLAGS(Capabilities)
@@ -87,6 +92,13 @@ struct LaunchCommand {
     bool isValid() const { return !program.isEmpty(); }
 };
 
+// Ce qu'il faut savoir du jeu lui-même pour bâtir la commande. Séparé de SystemEntry :
+// le système vient du fichier de description, le jeu vient du catalogue.
+struct LaunchDetails {
+    QString gameName;       // %GAMENAME%
+    int     optionIndex = 0; // laquelle des launchOptions du système (§7)
+};
+
 class PlatformAdapter
 {
 public:
@@ -116,11 +128,12 @@ public:
     // (4a) Construire la commande — fonction PURE, sans effet de bord.
     //      Séparée de launch() pour être testable sans rien exécuter.
     virtual LaunchCommand buildLaunchCommand(const SystemEntry &system,
-                                             const QString &romPath) const = 0;
+                                             const QString      &romPath,
+                                             const LaunchDetails &details) const = 0;
 
     // (4b) Exécuter. `error` reçoit le message COMPLET en cas d'échec (§15).
     virtual bool launch(const SystemEntry &system, const QString &romPath,
-                        QString *error) const = 0;
+                        const LaunchDetails &details, QString *error) const = 0;
 };
 
 } // namespace igiris::platform

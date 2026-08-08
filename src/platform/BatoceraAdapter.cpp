@@ -128,20 +128,37 @@ QStringList BatoceraAdapter::romDirectories() const
     return { roms };
 }
 
-LaunchCommand BatoceraAdapter::buildLaunchCommand(const SystemEntry &system,
-                                                  const QString &romPath) const
+LaunchCommand BatoceraAdapter::buildLaunchCommand(const SystemEntry   &system,
+                                                  const QString       &romPath,
+                                                  const LaunchDetails &details) const
 {
     LaunchCommand result;
     if (!system.isValid() || romPath.isEmpty())
         return result;
 
     // La commande est celle du fichier de description, jamais un chemin reconstitué (§1).
-    const QStringList tokens = tokenizeCommand(system.defaultCommand());
+    // L'option retenue est celle demandée, la première par défaut : le fichier les liste
+    // par ordre de préférence (§7).
+    const int index = (details.optionIndex >= 0
+                       && details.optionIndex < system.launchOptions.size())
+                          ? details.optionIndex
+                          : 0;
+    const QStringList tokens = tokenizeCommand(system.launchOptions.at(index).command);
     if (tokens.isEmpty())
         return result;
 
-    const SubstitutionResult substituted =
-        substitutePlaceholders(tokens, LaunchContext{ romPath, system.name });
+    LaunchContext context;
+    context.romPath        = romPath;
+    context.systemName     = system.name;
+    context.systemFullName = system.fullName; // %SYSTEMNAME% = le LIBELLÉ, pas la clé
+    context.gameName       = details.gameName;
+    context.homePath       = QDir::homePath();
+    // Vides, comme l'amont lorsqu'il n'a rien à fournir : pas de fiche XML produite, et
+    // aucune manette transmise tant que la capacité ControllerMapping n'est pas déclarée.
+    context.gameInfoXmlPath   = QString();
+    context.controllersConfig = QString();
+
+    const SubstitutionResult substituted = substitutePlaceholders(tokens, context);
 
     result.program                = substituted.tokens.first();
     result.arguments              = substituted.tokens.mid(1);
@@ -150,7 +167,7 @@ LaunchCommand BatoceraAdapter::buildLaunchCommand(const SystemEntry &system,
 }
 
 bool BatoceraAdapter::launch(const SystemEntry &system, const QString &romPath,
-                             QString *error) const
+                             const LaunchDetails &details, QString *error) const
 {
     const auto setError = [error](const QString &message) {
         if (error)
@@ -158,7 +175,7 @@ bool BatoceraAdapter::launch(const SystemEntry &system, const QString &romPath,
         return false;
     };
 
-    const LaunchCommand command = buildLaunchCommand(system, romPath);
+    const LaunchCommand command = buildLaunchCommand(system, romPath, details);
     if (!command.isValid())
         return setError(QStringLiteral("commande de lancement vide pour le système « %1 »")
                             .arg(system.name));

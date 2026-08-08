@@ -110,6 +110,9 @@ public:
     // §0 impose d'afficher TOUS les jeux, ROM présente ou non.
     QList<Game> allGames() const;
 
+    // Un jeu par sa clé. La fiche en a besoin : elle reçoit une clé, pas un titre.
+    std::optional<Game> gameByKey(const QString &gameKey) const;
+
     // §3, requête 4 — meilleure version d'un jeu, et sa fidélité d'émulation.
     QList<GamePlatform> platformsForGame(const QString &gameKey) const;
 
