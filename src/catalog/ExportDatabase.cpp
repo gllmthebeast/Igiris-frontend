@@ -314,6 +314,41 @@ QStringList ExportDatabase::allPlatformKeys() const
     return keys;
 }
 
+QStringList ExportDatabase::arcadePlatformKeys() const
+{
+    QStringList keys;
+    if (!m_db)
+        return keys;
+
+    const QString sql = QStringLiteral("SELECT DISTINCT %1 FROM exp_romset ORDER BY %1")
+                            .arg(platformColumn());
+    sqlite3_stmt *stmt = prepare(m_db, sql);
+    if (!stmt)
+        return keys;
+    while (sqlite3_step(stmt) == SQLITE_ROW)
+        keys.append(columnText(stmt, 0));
+    sqlite3_finalize(stmt);
+    return keys;
+}
+
+QHash<QString, int> ExportDatabase::headerSkipByPlatform() const
+{
+    QHash<QString, int> skips;
+    if (!m_db)
+        return skips;
+
+    const QString sql = QStringLiteral("SELECT %1, MAX(header_skip) FROM exp_rom_hash "
+                                       "WHERE header_skip > 0 GROUP BY %1")
+                            .arg(platformColumn());
+    sqlite3_stmt *stmt = prepare(m_db, sql);
+    if (!stmt)
+        return skips;
+    while (sqlite3_step(stmt) == SQLITE_ROW)
+        skips.insert(columnText(stmt, 0), sqlite3_column_int(stmt, 1));
+    sqlite3_finalize(stmt);
+    return skips;
+}
+
 QList<RomHash> ExportDatabase::romHashesForGame(const QString &gameKey) const
 {
     QList<RomHash> hashes;

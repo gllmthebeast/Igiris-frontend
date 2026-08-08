@@ -13,9 +13,14 @@
 
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
+#include <QDir>
+#include <QHash>
+#include <QSet>
 #include <QUrl>
 
 #include "catalog/ExportDatabase.h"
+#include "scan/RomScanner.h"
+#include "scan/ScanCache.h"
 #include "platform/AdapterRegistry.h"
 #include "systems/EsSystemsParser.h"
 #include "version.h"
@@ -187,6 +192,143 @@ int runExportCommand(const QString &path)
     return 0;
 }
 
+// Livrable du lot 4 : le rapport vert / rouge / noir (§7).
+//
+//   vert   système présent sur cette installation ET ROM présente
+//   rouge  système présent, ROM absente
+//   noir   système absent de cette installation
+//
+// « Présent sur cette installation » se lit ici dans les dossiers de ROMs. Au lot 7, ce
+// sera le fichier de description des systèmes qui tranchera, comme l'exige le §1.
+int runScanCommand(const QString &romsDir, const QString &exportPath)
+{
+    igiris::catalog::ExportDatabase db;
+    QString                         error;
+    if (!db.open(exportPath, &error)) {
+        std::fprintf(stderr, "✗ %s\n", qPrintable(error));
+        return 1;
+    }
+
+    const QStringList knownKeys = db.allPlatformKeys();
+
+    // Un sous-dossier par système, à la façon EmulationStation.
+    QList<igiris::scan::ScanTarget> targets;
+    QStringList                     localSystems;
+    const QDir                      root(romsDir);
+    for (const QString &entry : root.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
+        if (!knownKeys.contains(entry))
+            continue; // dossier qui ne correspond à aucune plateforme de l'export
+        localSystems.append(entry);
+        targets.append({ entry, root.absoluteFilePath(entry) });
+    }
+
+    if (targets.isEmpty()) {
+        std::fprintf(stderr, "✗ aucun dossier de système reconnu sous %s\n",
+                     qPrintable(romsDir));
+        return 1;
+    }
+
+    igiris::scan::ScanCache cache;
+    if (!cache.open(romsDir + QStringLiteral("/.igiris-scan-cache.db"), &error))
+        std::fprintf(stderr, "⚠ %s — scan sans cache\n", qPrintable(error));
+
+    igiris::scan::RomScanner scanner(db, cache.isOpen() ? &cache : nullptr);
+    const auto               report = scanner.scan(targets);
+
+    std::printf("%s\n  %lld systèmes · %d fichiers · %d hachés · %d depuis le cache\n\n",
+                qPrintable(romsDir), static_cast<long long>(targets.size()),
+                report.filesSeen, report.hashed, report.cacheHits);
+
+    // Quelles ROMs possède-t-on, et pour quelle plateforme.
+    QSet<QString> ownedPairs;
+    for (const auto &rom : report.identified)
+        ownedPairs.insert(rom.gameKey + QLatin1Char('\x1f') + rom.platformKey);
+
+    int green = 0, red = 0, black = 0;
+    std::printf("jeux possédés :\n");
+
+    for (const QString &gameKey : report.ownedGameKeys()) {
+        QString title;
+        QString line;
+        // Dédoublonnage par platformKey : un même jeu peut avoir plusieurs lignes pour la
+        // même plateforme (exp_game_platform a pour clé game_key + display_name, donc
+        // « SNES » et « SFAM » coexistent). Sans ça, les pastilles et les compteurs
+        // seraient doublés.
+        QSet<QString> seenPlatforms;
+        for (const auto &platform : db.platformsForGame(gameKey)) {
+            if (!platform.isEmulationTarget())
+                continue; // plateforme d'origine non émulée : ni verte, ni rouge, ni noire
+            if (seenPlatforms.contains(platform.platformKey))
+                continue;
+            seenPlatforms.insert(platform.platformKey);
+
+            const bool systemPresent = localSystems.contains(platform.platformKey);
+            const bool romPresent =
+                ownedPairs.contains(gameKey + QLatin1Char('\x1f') + platform.platformKey);
+
+            const char *mark = nullptr;
+            if (!systemPresent) {
+                mark = "⬛";
+                ++black;
+            } else if (romPresent) {
+                mark = "🟩";
+                ++green;
+            } else {
+                mark = "🟥";
+                ++red;
+            }
+            line += QStringLiteral(" %1%2").arg(QString::fromUtf8(mark), platform.platformKey);
+        }
+        for (const auto &rom : report.identified) {
+            if (rom.gameKey == gameKey) {
+                title = rom.title;
+                break;
+            }
+        }
+        std::printf("  %-44s%s\n", qPrintable(title), qPrintable(line));
+    }
+
+    std::printf("\n  🟩 %d possédés · 🟥 %d manquants sur système présent · ⬛ %d système absent\n",
+                green, red, black);
+
+    // Par quel chemin chaque ROM a été reconnue. C'est LE diagnostic de ce lot : une
+    // collection identifiée uniquement par CRC direct signalerait que les reprises
+    // d'en-tête ne se déclenchent pas, alors que rien ne planterait.
+    QHash<int, int> byKind;
+    for (const auto &rom : report.identified)
+        byKind[static_cast<int>(rom.kind)]++;
+
+    const struct {
+        igiris::scan::MatchKind kind;
+        const char             *label;
+    } kinds[] = {
+        { igiris::scan::MatchKind::Crc, "CRC direct" },
+        { igiris::scan::MatchKind::CrcHeaderSkip, "CRC après en-tête ignoré (export)" },
+        { igiris::scan::MatchKind::CrcSmcHeuristic, "CRC après en-tête SMC (heuristique)" },
+        { igiris::scan::MatchKind::ZipEntryCrc, "CRC lu dans le zip, sans décompression" },
+        { igiris::scan::MatchKind::Romset, "nom de romset (arcade)" },
+    };
+    std::printf("\nidentification :\n");
+    for (const auto &entry : kinds) {
+        const int count = byKind.value(static_cast<int>(entry.kind), 0);
+        if (count > 0)
+            std::printf("  %s %d\n",
+                        qPrintable(QString::fromUtf8(entry.label).leftJustified(40)), count);
+    }
+
+    if (!report.unidentified.isEmpty()) {
+        std::printf("\nnon reconnus (%lld) :\n",
+                    static_cast<long long>(report.unidentified.size()));
+        for (int i = 0; i < qMin<qsizetype>(10, report.unidentified.size()); ++i)
+            std::printf("  %s\n", qPrintable(report.unidentified.at(i)));
+    }
+
+    for (const QString &message : report.errors)
+        std::fprintf(stderr, "⚠ %s\n", qPrintable(message)); // verbatim (§15)
+
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char *argv[])
@@ -195,6 +337,17 @@ int main(int argc, char *argv[])
         if (std::strcmp(argv[i], "--version") == 0 || std::strcmp(argv[i], "-v") == 0) {
             printVersion();
             return 0;
+        }
+        if (std::strcmp(argv[i], "--scan") == 0) {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr,
+                             "usage : igiris-frontend --scan <dossier-roms> [export.db]\n");
+                return 1;
+            }
+            const QString roms = QString::fromLocal8Bit(argv[i + 1]);
+            const QString exp  = (i + 2 < argc) ? QString::fromLocal8Bit(argv[i + 2])
+                                                : QStringLiteral("data/games.db");
+            return runScanCommand(roms, exp);
         }
         if (std::strcmp(argv[i], "--export") == 0) {
             const QString path = (i + 1 < argc)

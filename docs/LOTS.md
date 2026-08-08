@@ -16,7 +16,7 @@
 | 1 | Adaptateur de plateforme + Batocera | tests sur arborescence factice | 0.2.0 | Opus 5 | **élevé** | ✅ **fait** |
 | 2 | Parser `es_systems` | CLI : liste systèmes + commandes de lancement | 0.3.0 | Sonnet 5 | moyen | ✅ **fait** |
 | 3 | Chargeur d'export + façade `platform_key` | les 4 requêtes du §3 rejouées en C++ | 0.4.0 | Opus 5 | moyen | ✅ **fait** |
-| 4 | Scanner de ROMs | rapport CLI vert / rouge / noir | 0.5.0 | Opus 5 | **élevé** | à faire |
+| 4 | Scanner de ROMs | rapport CLI vert / rouge / noir | 0.5.0 | Opus 5 | **élevé** | ✅ **fait** |
 | 5 | IHM QML : liste + recherche | binaire affichant la liste, navigation manette | 0.6.0 | Sonnet 5 | moyen | à faire |
 | 6 | Filtres statiques puis dynamiques | filtres combinables, interactifs | 0.7.0 | Sonnet 5 | moyen | à faire |
 | 7 | Fiche de jeu + lancement effectif | **un jeu se lance** | 0.8.0 | Opus 5 | moyen | à faire |
@@ -53,13 +53,19 @@ lot 9, et la correction sera chère. D'où l'effort élevé sur peu de code.
 `es_systems.cfg` → systèmes disponibles + **commandes de lancement lues, jamais
 hardcodées** (§1). C'est ce parser qui décide du statut *noir* (§7).
 
-**Fichiers de référence** : `~/igiris-frontend-refs/`, **hors du dépôt** (§15). Contient un
-`es_systems.xml` réel de 195 systèmes, seul échantillon obtenu au format d'exécution.
+**Fichiers de référence** : `~/igiris-frontend-refs/`, **hors du dépôt** (§15), avec son
+propre README. Le parser est validé sur **deux** fichiers réels :
 
-> ⚠️ Le `es_systems.yml` de Batocera récupéré à côté est la **source du générateur**, pas le
-> fichier lu à l'exécution : Batocera fabrique son `es_systems.cfg` sur l'appareil. Aucun
-> `es_systems.cfg` Batocera authentique n'a pu être récupéré ; à confirmer sur du matériel
-> réel avant de considérer le parser validé pour cette distribution.
+| Source | Systèmes | Placeholders | Résultat |
+|---|---|---|---|
+| Batocera 43.1, extrait de l'image (`/usr/share/emulationstation/`) | 224 | **5** | 224/224, 0 avertissement |
+| ES-DE, dépôt amont | 195 | 107 | 195/195, 0 avertissement |
+
+Le chemin où Batocera livre réellement le fichier est **exactement celui que l'adaptateur
+cherche en second** (lot 1) : l'hypothèse est confirmée sur l'image officielle.
+
+> Le `es_systems.yml` du dépôt Batocera, récupéré à côté, est la **source du générateur** et
+> non le format d'exécution — à ne pas confondre.
 
 ### Lot 3 — Chargeur d'export + façade `platform_key` · 0.4.0
 

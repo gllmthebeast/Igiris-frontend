@@ -7,6 +7,7 @@
 //
 // L'export est ouvert en LECTURE SEULE IMMUABLE. Jamais de WAL, jamais d'écriture.
 
+#include <QHash>
 #include <QList>
 #include <QString>
 #include <QStringList>
@@ -109,6 +110,15 @@ public:
     // Toutes les clés de plateforme émulables connues de l'export. Croisée avec les
     // systèmes locaux, elle donne le statut noir du §7.
     QStringList allPlatformKeys() const;
+
+    // Plateformes identifiées par NOM DE ROMSET et non par CRC (§4). Déduit de l'export
+    // lui-même plutôt que d'une liste en dur : si le backend ajoute une plateforme
+    // d'arcade, le scanner la traite sans qu'on touche au code.
+    QStringList arcadePlatformKeys() const;
+
+    // Octets d'en-tête à ignorer, par plateforme. Vient également de l'export : aujourd'hui
+    // nes=16, atari7800=128, lynx=64. Aucune table codée en dur ici.
+    QHash<QString, int> headerSkipByPlatform() const;
 
     // Sens inverse des requêtes 1 et 2 : quelles ROMs fournissent ce jeu.
     // La fiche de jeu (§7) en a besoin pour dire quelle release apporte quoi.

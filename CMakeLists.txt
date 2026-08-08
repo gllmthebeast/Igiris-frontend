@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 
 # SemVer strict (CLAUDE.md §15) : cette version est la seule source de vérité.
 # Elle alimente version.h, et c'est elle qu'affiche `igiris-frontend --version`.
-project(igiris-frontend VERSION 0.4.0 LANGUAGES CXX)
+project(igiris-frontend VERSION 0.5.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -14,6 +14,7 @@ find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Qml Quick Test)
 # file:games.db?immutable=1 avec SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, ce qui s'exprime
 # sans ambiguïté avec l'API C. Le lien est établi dès maintenant pour prouver la dépendance.
 find_package(SQLite3 REQUIRED)
+find_package(ZLIB REQUIRED)
 
 qt_standard_project_setup()
 
@@ -44,6 +45,15 @@ add_library(igiris-catalog STATIC
 target_include_directories(igiris-catalog PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(igiris-catalog PUBLIC Qt6::Core SQLite::SQLite3)
 
+# Lot 4 — scanner de ROMs. zlib fournit crc32() et l'inflate brut des entrées de zip.
+add_library(igiris-scan STATIC
+    src/scan/RomHasher.cpp
+    src/scan/ScanCache.cpp
+    src/scan/RomScanner.cpp
+)
+target_include_directories(igiris-scan PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(igiris-scan PUBLIC Qt6::Core igiris-catalog ZLIB::ZLIB SQLite::SQLite3)
+
 qt_add_executable(igiris-frontend src/main.cpp)
 
 qt_add_qml_module(igiris-frontend
@@ -56,7 +66,7 @@ qt_add_qml_module(igiris-frontend
 )
 
 target_include_directories(igiris-frontend PRIVATE ${CMAKE_BINARY_DIR}/generated)
-target_link_libraries(igiris-frontend PRIVATE Qt6::Quick SQLite::SQLite3 igiris-platform igiris-systems igiris-catalog)
+target_link_libraries(igiris-frontend PRIVATE Qt6::Quick SQLite::SQLite3 igiris-platform igiris-systems igiris-catalog igiris-scan)
 
 # ---------------------------------------------------------------------------------------
 # Tests
@@ -90,3 +100,8 @@ target_link_libraries(test-export-database PRIVATE igiris-catalog Qt6::Test)
 target_compile_definitions(test-export-database
                            PRIVATE IGIRIS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 add_test(NAME export-database COMMAND test-export-database)
+
+add_executable(test-rom-scanner tests/test_rom_scanner.cpp)
+target_link_libraries(test-rom-scanner PRIVATE igiris-scan Qt6::Test)
+target_include_directories(test-rom-scanner PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+add_test(NAME rom-scanner COMMAND test-rom-scanner)
