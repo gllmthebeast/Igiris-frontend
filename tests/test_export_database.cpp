@@ -15,6 +15,50 @@ using namespace igiris::catalog;
 
 namespace {
 
+// Ajoute les tables de langues du 1.4.0 à un export déjà construit.
+//
+// Volontairement SÉPARÉ de buildExport() : c'est ce qui permet de tester les deux formes
+// d'export avec le même code, et donc de vérifier qu'un 1.3.0 reste lisible — c'est toute
+// la définition d'une mineure additive (§2).
+bool addLanguages(const QString &path)
+{
+    sqlite3 *db = nullptr;
+    if (sqlite3_open(path.toUtf8().constData(), &db) != SQLITE_OK)
+        return false;
+
+    // « xx » n'a PAS de bit : c'est le cas que le backend annonce (bit_index NULL) et il
+    // doit être traité comme « pas de bit », jamais comme le bit 0.
+    const char *sql = R"(
+        ALTER TABLE exp_game ADD COLUMN lang_mask INTEGER;
+        CREATE TABLE exp_language(lang_code TEXT PRIMARY KEY, label TEXT NOT NULL,
+                                  badge_asset TEXT, bit_index INTEGER);
+        INSERT INTO exp_language VALUES('en','Anglais','lang/en.png',0),
+                                       ('fr','Français','lang/fr.png',1),
+                                       ('ja','Japonais','lang/ja.png',5),
+                                       ('xx','Sans bit','lang/xx.png',NULL);
+
+        CREATE TABLE exp_game_language(game_key TEXT NOT NULL, lang_code TEXT NOT NULL,
+                                       batocera_system TEXT NOT NULL, crc32 TEXT NOT NULL,
+                                       PRIMARY KEY(game_key, lang_code, batocera_system, crc32))
+            WITHOUT ROWID;
+        -- igdb-1 : anglais et français sur snes, japonais sur nes seulement.
+        INSERT INTO exp_game_language VALUES
+            ('igdb-1','en','snes','B19ED489'),
+            ('igdb-1','fr','snes','B19ED489'),
+            ('igdb-1','ja','nes','DEADBEEF'),
+            ('igdb-1','xx','snes','B19ED489');
+        -- en(0) | fr(1) | ja(5) = 35. « xx » n'entre pas dans le masque.
+        UPDATE exp_game SET lang_mask = 35 WHERE game_key = 'igdb-1';
+    )";
+
+    char      *errmsg = nullptr;
+    const bool ok     = sqlite3_exec(db, sql, nullptr, nullptr, &errmsg) == SQLITE_OK;
+    if (errmsg)
+        sqlite3_free(errmsg);
+    sqlite3_close(db);
+    return ok;
+}
+
 // Construit un export minimal au schéma 1.3.0.
 bool buildExport(const QString &path, const QString &schemaVersion)
 {
@@ -89,8 +133,145 @@ private slots:
 
     void romHashesForGame_roundTripsWithFindByCrc();
     void romsetsForGame_roundTripsWithFindByRomset();
+
+    // --- lot 8 : les langues ---
+    void languages_absentFromOlderExportWithoutBreakingIt();
+    void languages_orderedByBitAndNullIsNotBitZero();
+    void langMask_isTheOrOfTheBitsOfItsLanguages();
+    void ownedLangMask_countsOnlyOwnedRoms();
+    void ownedLangMask_isPerPlatformNotPerCrcAlone();
+    void languagesForGame_keepsCodesWithoutBit();
+
     void realExport_ifPresent();
 };
+
+void TestExportDatabase::languages_absentFromOlderExportWithoutBreakingIt()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath("games.db");
+    QVERIFY(buildExport(path, "1.3.0"));
+
+    ExportDatabase db;
+    QString        error;
+    // Un export sans tables de langues doit s'ouvrir NORMALEMENT : c'est la définition
+    // d'une mineure additive. Refuser ici serait une régression du §2.
+    QVERIFY2(db.open(path, &error), qPrintable(error));
+    QVERIFY(!db.hasLanguages());
+
+    // Et les accesseurs doivent rendre du vide, pas planter sur une table absente.
+    QVERIFY(db.languages().isEmpty());
+    QVERIFY(db.langMaskByGame().isEmpty());
+    QVERIFY(db.languagesForGame(QStringLiteral("igdb-1")).isEmpty());
+}
+
+void TestExportDatabase::languages_orderedByBitAndNullIsNotBitZero()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath("games.db");
+    QVERIFY(buildExport(path, "1.4.0"));
+    QVERIFY(addLanguages(path));
+
+    ExportDatabase db;
+    QVERIFY(db.open(path, nullptr));
+    QVERIFY(db.hasLanguages());
+
+    const auto languages = db.languages();
+    QCOMPARE(languages.size(), 4);
+
+    // Ordre des BITS, pas alphabétique : « ja » (bit 5) après « fr » (bit 1).
+    QCOMPARE(languages.at(0).code, QStringLiteral("en"));
+    QCOMPARE(languages.at(1).code, QStringLiteral("fr"));
+    QCOMPARE(languages.at(2).code, QStringLiteral("ja"));
+
+    // NULL est l'ABSENCE de bit. Le confondre avec le bit 0 ferait passer « xx » pour de
+    // l'anglais sur tout le catalogue, sans qu'aucune requête n'échoue.
+    QCOMPARE(languages.at(3).code, QStringLiteral("xx"));
+    QVERIFY(!languages.at(3).hasBit());
+    QCOMPARE(languages.at(3).bit(), quint64(0));
+    QCOMPARE(languages.at(0).bit(), quint64(1)); // en = bit 0
+}
+
+void TestExportDatabase::langMask_isTheOrOfTheBitsOfItsLanguages()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath("games.db");
+    QVERIFY(buildExport(path, "1.4.0"));
+    QVERIFY(addLanguages(path));
+
+    ExportDatabase db;
+    QVERIFY(db.open(path, nullptr));
+
+    const auto masks = db.langMaskByGame();
+    QCOMPARE(masks.value(QStringLiteral("igdb-1")), quint64(0b100011)); // en|fr|ja
+    // Un jeu sans langue n'a pas d'entrée : ce n'est pas un masque à zéro à interpréter.
+    QVERIFY(!masks.contains(QStringLiteral("igdb-2")));
+}
+
+void TestExportDatabase::ownedLangMask_countsOnlyOwnedRoms()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath("games.db");
+    QVERIFY(buildExport(path, "1.4.0"));
+    QVERIFY(addLanguages(path));
+
+    ExportDatabase db;
+    QVERIFY(db.open(path, nullptr));
+
+    // On ne possède que la ROM snes : anglais et français illuminés, japonais non — il
+    // n'existe que sur la ROM nes, absente. C'est toute la règle du §8.
+    const QSet<QString> owned = { romKey(QStringLiteral("B19ED489"), QStringLiteral("snes")) };
+    const auto          masks = db.ownedLangMaskByGame(owned);
+    QCOMPARE(masks.value(QStringLiteral("igdb-1")), quint64(0b000011));
+
+    // Sans aucune ROM, aucun badge illuminé — et surtout pas « tout ».
+    QVERIFY(db.ownedLangMaskByGame({}).isEmpty());
+}
+
+void TestExportDatabase::ownedLangMask_isPerPlatformNotPerCrcAlone()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath("games.db");
+    QVERIFY(buildExport(path, "1.4.0"));
+    QVERIFY(addLanguages(path));
+
+    ExportDatabase db;
+    QVERIFY(db.open(path, nullptr));
+
+    // Le bon CRC sur la MAUVAISE plateforme ne doit rien allumer. Un CRC seul n'identifie
+    // rien : c'est le couple qui est la clé, ici comme dans exp_rom_hash.
+    const QSet<QString> owned = { romKey(QStringLiteral("B19ED489"), QStringLiteral("nes")) };
+    QVERIFY(db.ownedLangMaskByGame(owned).isEmpty());
+}
+
+void TestExportDatabase::languagesForGame_keepsCodesWithoutBit()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath("games.db");
+    QVERIFY(buildExport(path, "1.4.0"));
+    QVERIFY(addLanguages(path));
+
+    ExportDatabase db;
+    QVERIFY(db.open(path, nullptr));
+
+    const auto languages = db.languagesForGame(QStringLiteral("igdb-1"));
+    QCOMPARE(languages.size(), 4);
+
+    // « xx » est hors masque mais PRÉSENT ici : la fiche de jeu ne passe pas par le
+    // masque, elle n'a donc pas à perdre ces langues.
+    QStringList codes;
+    for (const auto &language : languages)
+        codes.append(language.langCode);
+    QVERIFY(codes.contains(QStringLiteral("xx")));
+
+    // Et chaque ligne porte bien SA plateforme et SON crc — sans quoi l'illumination par
+    // plateforme du §7 serait incalculable.
+    for (const auto &language : languages) {
+        if (language.langCode == QStringLiteral("ja")) {
+            QCOMPARE(language.platformKey, QStringLiteral("nes"));
+            QCOMPARE(language.crc32, QStringLiteral("DEADBEEF"));
+        }
+    }
+}
 
 void TestExportDatabase::open_readsMeta()
 {

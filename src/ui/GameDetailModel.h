@@ -19,7 +19,9 @@
 
 #include <QAbstractListModel>
 #include <QHash>
+#include <QSet>
 #include <QString>
+#include <QVariantList>
 
 namespace igiris::platform {
 class PlatformAdapter;
@@ -54,6 +56,10 @@ public:
         RomPathRole,
         LaunchLabelRole,
         DefaultChoiceRole,
+        // §7 : « c'est ici, et pas en vue liste, qu'on détaille quelle release apporte
+        // quelles langues ». Liste de { code, owned } RESTREINTE à cette plateforme —
+        // c'est la seule différence de sémantique avec les badges du §8.
+        LanguagesRole,
     };
 
     explicit GameDetailModel(QObject *parent = nullptr);
@@ -66,6 +72,14 @@ public:
 
     // ROMs identifiées par le scan : (gameKey, platformKey) → chemin.
     void setOwnedRoms(QHash<QString, QString> ownedRoms);
+
+    // Le référentiel de langues, pour l'ordre d'affichage et les libellés.
+    void setLanguages(QList<catalog::Language> languages);
+
+    // Les ROMs possédées, désignées par catalog::romKey(crc32, platformKey). C'est CETTE
+    // clé, et pas le chemin, qui décide de l'illumination : la règle du §8 porte sur le
+    // crc32 de exp_game_language, pas sur le fichier.
+    void setOwnedRomKeys(QSet<QString> ownedRomKeys);
 
     Q_INVOKABLE void setGame(const QString &gameKey);
 
@@ -99,15 +113,22 @@ private:
         bool    isPreferred = false;
         Status  status      = Black;
         QString romPath;
-        QString launchLabel;
-        bool    isDefaultChoice = false;
+        QString      launchLabel;
+        bool         isDefaultChoice = false;
+        QVariantList languages;
     };
+
+    // Rang d'affichage d'une langue : possédée d'abord, puis l'ordre des bits, puis les
+    // langues sans bit. Même ordre qu'en vue liste, restreint à une plateforme.
+    int languageRank(const QString &code) const;
 
     const catalog::ExportDatabase   *m_db      = nullptr;
     const platform::PlatformAdapter *m_adapter = nullptr;
 
     QHash<QString, platform::SystemEntry> m_localSystems;
     QHash<QString, QString>               m_ownedRoms;
+    QSet<QString>                         m_ownedRomKeys;
+    QList<catalog::Language>              m_languages;
 
     QString    m_gameKey;
     QString    m_title;

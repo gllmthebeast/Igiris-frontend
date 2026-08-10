@@ -1,6 +1,9 @@
 #include "ui/GameDetailModel.h"
 
 #include <QSet>
+#include <QVariantMap>
+
+#include <algorithm>
 
 namespace igiris::ui {
 
@@ -46,6 +49,32 @@ void GameDetailModel::setOwnedRoms(QHash<QString, QString> ownedRoms)
         setGame(m_gameKey);
 }
 
+void GameDetailModel::setLanguages(QList<catalog::Language> languages)
+{
+    m_languages = std::move(languages);
+    if (!m_gameKey.isEmpty())
+        setGame(m_gameKey);
+}
+
+void GameDetailModel::setOwnedRomKeys(QSet<QString> ownedRomKeys)
+{
+    m_ownedRomKeys = std::move(ownedRomKeys);
+    if (!m_gameKey.isEmpty())
+        setGame(m_gameKey);
+}
+
+int GameDetailModel::languageRank(const QString &code) const
+{
+    for (const catalog::Language &language : m_languages) {
+        if (language.code != code)
+            continue;
+        // Sans bit : reléguée en fin, mais AFFICHÉE. La fiche lit exp_game_language
+        // directement, elle n'a donc pas la limite du masque que subit la vue liste.
+        return language.hasBit() ? language.bitIndex : 1000;
+    }
+    return 2000; // code absent du référentiel : dernier, mais jamais perdu
+}
+
 void GameDetailModel::setGame(const QString &gameKey)
 {
     beginResetModel();
@@ -58,6 +87,18 @@ void GameDetailModel::setGame(const QString &gameKey)
         if (const auto game = m_db->gameByKey(gameKey)) {
             m_title  = game->title;
             m_rating = game->rating;
+        }
+
+        // Les langues du jeu, regroupées par plateforme. Une plateforme peut porter
+        // PLUSIEURS ROMs pour la même langue (une européenne, une américaine) : la langue
+        // est illuminée dès qu'UNE d'entre elles est possédée — d'où le OU, et non le
+        // dernier vu qui l'écraserait.
+        QHash<QString, QHash<QString, bool>> languagesByPlatform;
+        for (const auto &language : m_db->languagesForGame(gameKey)) {
+            const bool owned = m_ownedRomKeys.contains(
+                catalog::romKey(language.crc32, language.platformKey));
+            bool &state = languagesByPlatform[language.platformKey][language.langCode];
+            state       = state || owned;
         }
 
         QSet<QString> seen; // exp_game_platform a pour clé (game_key, display_name)
@@ -75,6 +116,24 @@ void GameDetailModel::setGame(const QString &gameKey)
             row.emuScore    = platform.emuScore;
             row.isPreferred = platform.isPreferred;
             row.romPath     = m_ownedRoms.value(ownedKey(gameKey, platform.platformKey));
+
+            const auto languages = languagesByPlatform.value(platform.platformKey);
+            QStringList codes    = languages.keys();
+            std::sort(codes.begin(), codes.end(),
+                      [this, &languages](const QString &a, const QString &b) {
+                          // Possédée d'abord, puis l'ordre du catalogue : le même ordre
+                          // qu'en vue liste, pour que l'œil retrouve les mêmes badges.
+                          if (languages.value(a) != languages.value(b))
+                              return languages.value(a);
+                          const int rankA = languageRank(a), rankB = languageRank(b);
+                          return rankA != rankB ? rankA < rankB : a < b;
+                      });
+            for (const QString &code : codes) {
+                QVariantMap badge;
+                badge.insert(QStringLiteral("code"), code);
+                badge.insert(QStringLiteral("owned"), languages.value(code));
+                row.languages.append(badge);
+            }
 
             const auto system = m_localSystems.constFind(platform.platformKey);
             if (system == m_localSystems.cend()) {
@@ -208,6 +267,8 @@ QVariant GameDetailModel::data(const QModelIndex &index, int role) const
         return row.launchLabel;
     case DefaultChoiceRole:
         return row.isDefaultChoice;
+    case LanguagesRole:
+        return row.languages;
     default:
         return {};
     }
@@ -221,6 +282,7 @@ QHash<int, QByteArray> GameDetailModel::roleNames() const
         { StatusRole, "status" },           { RomPathRole, "romPath" },
         { LaunchLabelRole, "launchLabel" },
         { DefaultChoiceRole, "isDefaultChoice" },
+        { LanguagesRole, "languages" },
     };
 }
 

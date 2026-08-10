@@ -71,6 +71,57 @@ QString ownedKey(const QString &game, const QString &platform)
     return game + QLatin1Char('\x1f') + platform;
 }
 
+// Les langues du 1.4.0, greffées sur l'export du lot 7.
+//
+// Le cas construit ici est CELUI qui distingue la fiche de la vue liste : le même jeu
+// existe en anglais sur snes ET sur psx, mais seule la ROM snes est possédée. Le §7 exige
+// que l'anglais soit illuminé sur snes et grisé sur psx — l'union du §8 ne suffit pas.
+bool addLanguages(const QString &path)
+{
+    sqlite3 *db = nullptr;
+    if (sqlite3_open(path.toUtf8().constData(), &db) != SQLITE_OK)
+        return false;
+
+    const char *sql =
+        "ALTER TABLE exp_game ADD COLUMN lang_mask INTEGER;"
+        "CREATE TABLE exp_language(lang_code TEXT PRIMARY KEY, label TEXT NOT NULL,"
+        " badge_asset TEXT, bit_index INTEGER);"
+        "INSERT INTO exp_language VALUES('en','Anglais',NULL,0),('fr','Français',NULL,1),"
+        " ('ja','Japonais',NULL,5),('xx','Sans bit',NULL,NULL);"
+        "CREATE TABLE exp_game_language(game_key TEXT, lang_code TEXT, batocera_system TEXT,"
+        " crc32 TEXT, PRIMARY KEY(game_key, lang_code, batocera_system, crc32)) WITHOUT ROWID;"
+        "INSERT INTO exp_game_language VALUES"
+        " ('igdb-1','en','snes','AAAA1111'),"
+        " ('igdb-1','ja','snes','BBBB2222'),"   // autre ROM snes, NON possédée
+        " ('igdb-1','xx','snes','AAAA1111'),"   // sans bit : doit rester visible en fiche
+        " ('igdb-1','en','psx','CCCC3333'),"
+        " ('igdb-1','fr','psx','CCCC3333');"
+        "UPDATE exp_game SET lang_mask = 35 WHERE game_key = 'igdb-1';";
+
+    const bool ok = sqlite3_exec(db, sql, nullptr, nullptr, nullptr) == SQLITE_OK;
+    sqlite3_close(db);
+    return ok;
+}
+
+QList<igiris::catalog::Language> sampleLanguages()
+{
+    return { { QStringLiteral("en"), QStringLiteral("Anglais"), {}, 0 },
+             { QStringLiteral("fr"), QStringLiteral("Français"), {}, 1 },
+             { QStringLiteral("ja"), QStringLiteral("Japonais"), {}, 5 },
+             { QStringLiteral("xx"), QStringLiteral("Sans bit"), {}, -1 } };
+}
+
+QStringList badgeCodes(const QVariantList &badges)
+{
+    QStringList codes;
+    for (const QVariant &badge : badges) {
+        const QVariantMap map = badge.toMap();
+        codes.append(map.value("owned").toBool() ? map.value("code").toString().toUpper()
+                                                 : map.value("code").toString());
+    }
+    return codes;
+}
+
 } // namespace
 
 class TestGameDetailModel : public QObject
@@ -86,7 +137,104 @@ private slots:
     void launch_refusesAnythingButGreen();
     void commandPreview_resolvesTheRealBatoceraCommand();
     void launchWarning_tellsWhatIsMissing();
+
+    // --- lot 8 : les langues, plateforme par plateforme ---
+    void languages_areRestrictedToTheirOwnPlatform();
+    void languages_surviveWithoutABitIndex();
+    void languages_stayEmptyOnAnExportWithoutThem();
 };
+
+void TestGameDetailModel::languages_areRestrictedToTheirOwnPlatform()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath("games.db");
+    QVERIFY(buildExport(path));
+    QVERIFY(addLanguages(path));
+    ExportDatabase db;
+    QVERIFY(db.open(path, nullptr));
+
+    GameDetailModel model;
+    model.setCatalogue(&db);
+    model.setLanguages(sampleLanguages());
+    model.setLocalSystems({ { QStringLiteral("snes"), system("snes", "Super Nintendo") },
+                            { QStringLiteral("psx"), system("psx", "PlayStation") } });
+    // Une seule ROM possédée : la snes anglaise.
+    model.setOwnedRomKeys({ igiris::catalog::romKey(QStringLiteral("AAAA1111"),
+                                                    QStringLiteral("snes")) });
+    model.setGame(QStringLiteral("igdb-1"));
+
+    const auto languagesAt = [&](const QString &platformKey) {
+        for (int i = 0; i < model.rowCount(); ++i) {
+            const QModelIndex index = model.index(i, 0);
+            if (index.data(GameDetailModel::PlatformKeyRole).toString() == platformKey)
+                return badgeCodes(index.data(GameDetailModel::LanguagesRole).toList());
+        }
+        return QStringList{ QStringLiteral("<plateforme absente>") };
+    };
+
+    // snes : l'anglais est ILLUMINÉ — la ROM possédée le fournit. « xx » l'est aussi, il
+    // vient du MÊME crc : une langue hors masque reste parfaitement illuminable, puisque
+    // la fiche décide sur le crc et non sur le masque. Le japonais existe sur snes mais
+    // vient d'une autre ROM, absente : grisé. Les possédées passent devant (§8).
+    QCOMPARE(languagesAt(QStringLiteral("snes")),
+             QStringList({ QStringLiteral("EN"), QStringLiteral("XX"), QStringLiteral("ja") }));
+
+    // psx : l'anglais existe AUSSI, mais aucune ROM psx n'est possédée. C'est LE test du
+    // §7 — l'union du §8 illuminerait l'anglais partout, ce qui serait faux ici.
+    QCOMPARE(languagesAt(QStringLiteral("psx")),
+             QStringList({ QStringLiteral("en"), QStringLiteral("fr") }));
+
+    // wiiu : présent au catalogue, aucune langue rattachée. Pas de badge, pas de vide à
+    // interpréter.
+    QVERIFY(languagesAt(QStringLiteral("wiiu")).isEmpty());
+}
+
+void TestGameDetailModel::languages_surviveWithoutABitIndex()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath("games.db");
+    QVERIFY(buildExport(path));
+    QVERIFY(addLanguages(path));
+    ExportDatabase db;
+    QVERIFY(db.open(path, nullptr));
+
+    GameDetailModel model;
+    model.setCatalogue(&db);
+    model.setLanguages(sampleLanguages());
+    model.setLocalSystems({ { QStringLiteral("snes"), system("snes", "Super Nintendo") } });
+    model.setGame(QStringLiteral("igdb-1"));
+
+    // La fiche lit exp_game_language directement : elle n'a pas la limite du masque, et
+    // « xx » doit donc y apparaître — relégué en fin, mais jamais perdu.
+    for (int i = 0; i < model.rowCount(); ++i) {
+        const QModelIndex index = model.index(i, 0);
+        if (index.data(GameDetailModel::PlatformKeyRole).toString() != QLatin1String("snes"))
+            continue;
+        const QStringList codes = badgeCodes(index.data(GameDetailModel::LanguagesRole).toList());
+        QVERIFY(codes.contains(QStringLiteral("xx")));
+        QCOMPARE(codes.last(), QStringLiteral("xx"));
+    }
+}
+
+void TestGameDetailModel::languages_stayEmptyOnAnExportWithoutThem()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath("games.db");
+    QVERIFY(buildExport(path)); // 1.3.0, sans tables de langues
+    ExportDatabase db;
+    QVERIFY(db.open(path, nullptr));
+
+    GameDetailModel model;
+    model.setCatalogue(&db);
+    model.setLocalSystems({ { QStringLiteral("snes"), system("snes", "Super Nintendo") } });
+    model.setGame(QStringLiteral("igdb-1"));
+
+    // La fiche reste parfaitement fonctionnelle sans langues : statuts, lancement, tout
+    // le lot 7 continue de marcher. C'est la définition d'un ajout mineur.
+    QVERIFY(model.rowCount() > 0);
+    for (int i = 0; i < model.rowCount(); ++i)
+        QVERIFY(model.index(i, 0).data(GameDetailModel::LanguagesRole).toList().isEmpty());
+}
 
 void TestGameDetailModel::statuses_comeFromTheSystemsFileNotTheCatalogue()
 {

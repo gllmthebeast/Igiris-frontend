@@ -20,7 +20,7 @@
 | 5 | IHM QML : liste + recherche | binaire affichant la liste, navigation manette | 0.6.0 | Sonnet 5 | moyen | ✅ **fait** |
 | 6 | Filtres statiques puis dynamiques | filtres combinables, interactifs | 0.7.0 | Sonnet 5 | moyen | ✅ **fait** |
 | 7 | Fiche de jeu + lancement effectif | **un jeu se lance** | 0.8.0 | Opus 5 | moyen | ✅ **fait** |
-| 8 | Badges de langue | badges illuminé/grisé + filtres langue | 0.9.0 | Opus 5 | moyen | 🔒 **bloqué** |
+| 8 | Badges de langue | badges illuminé/grisé + filtres langue | **1.1.0** | Opus 5 | moyen | ✅ **fait** |
 | 9 | Second adaptateur (Recalbox) | Recalbox marche **sans toucher** au reste | 0.10.0 | Opus 5 | faible en code | ⚠️ **fait — flaw corrigé** |
 | 10 | Empaquetage + démarrage | archive installable + accroche de démarrage | 1.0.0 | Sonnet 5 | moyen | ✅ **fait** |
 
@@ -181,15 +181,68 @@ ce que l'amont n'a jamais puisque le vide disparaît dans sa chaîne.
 > de proposer par défaut le système `is_preferred` : c'est impossible en l'état. Le défaut
 > retenu est le **premier système jouable** (vert, puis meilleur `emu_score`). **À signaler
 > au backend** — c'est une anomalie de données, pas un choix d'affichage.
+>
+> **Suite, 2026-08-09 — signalé, diagnostiqué, corrigé côté backend.** La cause : le
+> marquage testait `elo = MAX(elo)`, or un variant jamais comparé reste à l'elo de départ.
+> Le champ décrivait donc **l'absence de vote**. Il ne marque plus que 31 lignes, avec
+> unicité garantie. **Le repli du frontend reste en place** — il devient le cas normal, et
+> `is_preferred = 1` signifie enfin « la communauté a tranché ». Aucun code n'a changé ici.
 
-### Lot 8 — Badges de langue · 0.9.0 · 🔒 BLOQUÉ
+### Lot 8 — Badges de langue · **1.1.0**
 
-Bloqué par une **livraison du backend**, pas par du travail à faire ici :
-`exp_language`, `exp_game_language`, `exp_game.lang_mask` (§9.2). Ajout **additif** →
-version mineure 1.4.0 de l'export.
+Débloqué le 2026-08-09 par la livraison de l'export **1.4.0**
+(`docs/demandes-backend/export-1.4.0-langues-REPONSE.md`). Arrivé **après** le 1.0.0, il
+prend donc la version **1.1.0** et non le 0.9.0 prévu : ajout de fonctionnalité sur une
+version publiée, c'est une mineure (§15).
 
-C'est une **demande adressée au projet `igiris`**, qui n'est pas un lot de ce projet-ci.
-Si le backend livre tôt, ce lot se replace juste après le lot 6.
+#### La preuve que c'était bien un ajout mineur
+
+Le binaire **1.0.0, non modifié**, lisait déjà l'export 1.4.0 — vérifié avant d'écrire une
+ligne de ce lot. Symétriquement, le 1.1.0 lit toujours un export **1.3.0** : `hasLanguages()`
+se décide sur la **présence des tables**, pas sur le numéro de mineure, et trois tests le
+verrouillent (`languages_absentFromOlderExportWithoutBreakingIt`,
+`languages_stayEmptyOnAnExportWithoutThem`). L'interface annonce l'absence au lieu
+d'afficher un filtre vide et des lignes muettes.
+
+#### Les deux filtres, et pourquoi ils sont voisins et non fusionnés
+
+| Filtre | Nature | Source | Mesuré sur le vrai export |
+|---|---|---|---|
+| « existe en fr » | statique | `exp_game.lang_mask` | 3 138 jeux |
+| « jouable en fr » | dynamique | masque × ROMs possédées | dépend du scan |
+
+Le §8 impose que « ce qui illumine un badge soit exactement ce qui fait passer un jeu à
+travers le filtre » : c'est **un seul ET binaire de masques**, appelé à deux endroits. Les
+présenter côte à côte dans la barre est délibéré — ce sont deux questions différentes, et
+les confondre est précisément le piège que le §8 signale.
+
+`--languages` les affiche **l'un sous l'autre** pour cette raison : c'est le seul moyen de
+voir qu'on ne les a pas interverties. La commande vérifie aussi que « jouable » est un
+sous-ensemble d'« existe » pour chaque langue — un dépassement signalerait deux
+référentiels de bits différents, l'erreur silencieuse que le §8 redoute.
+
+#### Ce que le lot a corrigé en cours de route
+
+Le modèle **ignorait silencieusement** un filtre sur une langue sans `bit_index` — donc
+renvoyait le catalogue entier, qui se lit comme un résultat de recherche. Le filtre
+*paraissait* fonctionner. Il expose désormais `unfilterableLanguages`, et `--languages`
+affiche « hors masque » plutôt qu'un nombre. Concerne 3 codes sur 25, 7 lignes sur 92 850 —
+mais c'est la classe d'erreur la plus coûteuse : celle qui ne se voit pas.
+
+#### Mesure exigée par le §17
+
+> « la liste nue est le point de référence de performance ; on mesure ensuite le coût réel
+> des badges par rapport à cette base. »
+
+**1,1 µs par ligne** — 20 965 badges sur les 7 581 lignes du catalogue, 8 ms au total.
+Et les badges ne sont construits que pour les lignes **visibles** : rien n'est stocké par
+jeu, seulement deux `quint64`.
+
+#### Ce que le backend a tranché, et qui se voit ici
+
+Aucune langue n'est déduite pour `Europe`, `World` et `Asia`. Un jeu européen sans balise
+de langues n'a **aucun badge** — ce n'est pas un défaut d'affichage à compenser. Couverture
+réelle : **5 986 jeux sur 7 581 (79 %)**.
 
 ### Lot 9 — Second adaptateur (Recalbox) · 0.10.0
 
@@ -296,9 +349,13 @@ dans le fork — pas dans ce depot.
 ## Écarts assumés par rapport au §17
 
 **1. Étapes 6 et 7 inversées** (filtres avant badges). Non par confort : les badges
-dépendent de `exp_game_language`, qui n'existe pas dans l'export 1.3.0. Les filtres, eux, ne
-dépendent de rien. La note d'ordonnancement du §17 reste respectée — la liste nue du lot 5
-demeure le point de référence de performance.
+dépendaient de `exp_game_language`, absent de l'export 1.3.0. Les filtres, eux, ne
+dépendaient de rien. La note d'ordonnancement du §17 est **respectée jusqu'au bout** : la
+liste nue du lot 5 a bien servi de point de référence, et le coût des badges a été mesuré
+contre elle (1,1 µs/ligne) au moment du lot 8, pas estimé.
+
+Conséquence de version : le lot 8 est arrivé **après** le 1.0.0 du lot 10. Il livre donc
+un **1.1.0** — mineure sur une version publiée — et non le 0.9.0 initialement prévu.
 
 **2. Ajout d'un lot 0** absent du §17. Le projet part d'une machine sans aucune chaîne de
 build : le socle est un préalable, pas une étape de conception.

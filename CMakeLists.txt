@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 
 # SemVer strict (CLAUDE.md §15) : cette version est la seule source de vérité.
 # Elle alimente version.h, et c'est elle qu'affiche `igiris-frontend --version`.
-project(igiris-frontend VERSION 1.0.0 LANGUAGES CXX)
+project(igiris-frontend VERSION 1.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -73,7 +73,7 @@ qt_add_qml_module(igiris-frontend
     # Fixé explicitement : Qt 6.4 place les ressources sous « / », Qt 6.5 sous « /qt/qml ».
     # Sans ce réglage, le chemin qrc du main.cpp dépendrait de la version de Qt du système.
     RESOURCE_PREFIX "/qt/qml"
-    QML_FILES qml/Main.qml qml/FilterCell.qml qml/GameDetail.qml
+    QML_FILES qml/Main.qml qml/FilterCell.qml qml/GameDetail.qml qml/LanguageBadge.qml
 )
 
 target_include_directories(igiris-frontend PRIVATE ${CMAKE_BINARY_DIR}/generated)

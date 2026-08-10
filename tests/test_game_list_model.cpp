@@ -40,6 +40,29 @@ void feed(GameListModel &model)
     model.setCatalogue(sampleGames(), platforms, { QStringLiteral("mame") });
 }
 
+// Le référentiel de langues tel que l'export 1.4.0 le donne, y compris le cas qui casse
+// en silence : une langue SANS bit (bit_index NULL côté backend).
+QList<igiris::catalog::Language> sampleLanguages()
+{
+    using igiris::catalog::Language;
+    return {
+        { QStringLiteral("en"), QStringLiteral("Anglais"), {}, 0 },
+        { QStringLiteral("fr"), QStringLiteral("Français"), {}, 1 },
+        { QStringLiteral("de"), QStringLiteral("Allemand"), {}, 3 },
+        { QStringLiteral("ja"), QStringLiteral("Japonais"), {}, 5 },
+        { QStringLiteral("xx"), QStringLiteral("Sans bit"), {}, -1 },
+    };
+}
+
+// igdb-1 : ja seul · igdb-2 : en, fr, de, ja · igdb-3 : en, fr
+void feedLanguages(GameListModel &model)
+{
+    model.setLanguages(sampleLanguages(),
+                       { { QStringLiteral("igdb-1"), 0b100000 },
+                         { QStringLiteral("igdb-2"), 0b101011 },
+                         { QStringLiteral("igdb-3"), 0b000011 } });
+}
+
 } // namespace
 
 class TestGameListModel : public QObject
@@ -67,7 +90,215 @@ private slots:
     void ownership_splitsOwnedAndMissingAfterScan();
     void ownership_emptyScanStillMeansAvailable();
     void clearFilters_restoresEverything();
+
+    // --- lot 8 : badges et filtres de langue ---
+    void languages_areUnavailableOnAnExportWithoutThem();
+    void languageFilter_static_findsGamesThatExistInThatLanguage();
+    void languageFilter_multipleCodesRequireThemAll();
+    void languageFilter_dynamic_doesNotFilterBeforeAnyScan();
+    void languageFilter_dynamic_keepsOnlyPlayableOnes();
+    void languageFilter_reportsCodesItCannotHonour();
+    void badges_orderOwnedFirstThenCatalogue();
+    void badges_areBoundedAndCountTheRest();
+    void badges_ownedNeverExceedsTheCatalogue();
 };
+
+void TestGameListModel::languages_areUnavailableOnAnExportWithoutThem()
+{
+    GameListModel model;
+    feed(model);
+
+    // Export 1.3.0 : pas de langues. L'interface doit pouvoir le DIRE, pas afficher un
+    // filtre vide et des lignes muettes sans explication.
+    QVERIFY(!model.languagesAvailable());
+    QVERIFY(model.availableLanguages().isEmpty());
+    QVERIFY(!model.ownedLanguagesAvailable());
+    QCOMPARE(model.rowCount(), 3);
+
+    const QModelIndex index = model.index(0, 0);
+    QVERIFY(index.data(GameListModel::LanguagesRole).toList().isEmpty());
+    QCOMPARE(index.data(GameListModel::ExtraLanguageCountRole).toInt(), 0);
+}
+
+void TestGameListModel::languageFilter_static_findsGamesThatExistInThatLanguage()
+{
+    GameListModel model;
+    feed(model);
+    feedLanguages(model);
+
+    QVERIFY(model.languagesAvailable());
+    // Les langues sans bit ne sont pas proposables : le masque ne peut pas les porter.
+    QCOMPARE(model.availableLanguages(),
+             QStringList({ QStringLiteral("en"), QStringLiteral("fr"), QStringLiteral("de"),
+                           QStringLiteral("ja") }));
+
+    // « existe en français » : STATIQUE, disponible sans le moindre scan.
+    model.setLanguageFilter({ QStringLiteral("fr") });
+    QCOMPARE(model.rowCount(), 2); // igdb-2 et igdb-3
+
+    model.setLanguageFilter({ QStringLiteral("ja") });
+    QCOMPARE(model.rowCount(), 2); // igdb-1 et igdb-2
+
+    model.setLanguageFilter({});
+    QCOMPARE(model.rowCount(), 3);
+}
+
+void TestGameListModel::languageFilter_multipleCodesRequireThemAll()
+{
+    GameListModel model;
+    feed(model);
+    feedLanguages(model);
+
+    // ET binaire, pas OU : le §8 fournit lang_mask précisément pour ça.
+    model.setLanguageFilter({ QStringLiteral("fr"), QStringLiteral("ja") });
+    QCOMPARE(model.rowCount(), 1); // igdb-2 seul porte les deux
+
+    model.setLanguageFilter({ QStringLiteral("fr"), QStringLiteral("en") });
+    QCOMPARE(model.rowCount(), 2);
+}
+
+void TestGameListModel::languageFilter_dynamic_doesNotFilterBeforeAnyScan()
+{
+    GameListModel model;
+    feed(model);
+    feedLanguages(model);
+
+    QVERIFY(!model.ownedLanguagesAvailable());
+    model.setLanguageFilter({ QStringLiteral("fr") });
+    model.setLanguageOwnedOnly(true);
+
+    // Sans scan, « jouable en français » n'est pas calculable. Répondre « aucun jeu »
+    // serait une affirmation fausse ; on ne filtre pas — même règle que la possession.
+    QCOMPARE(model.rowCount(), 3);
+}
+
+void TestGameListModel::languageFilter_dynamic_keepsOnlyPlayableOnes()
+{
+    GameListModel model;
+    feed(model);
+    feedLanguages(model);
+
+    // igdb-2 : on possède une ROM anglaise seulement. igdb-3 : rien.
+    model.setOwnedLanguageMasks({ { QStringLiteral("igdb-2"), 0b000001 } });
+    QVERIFY(model.ownedLanguagesAvailable());
+
+    model.setLanguageFilter({ QStringLiteral("en") });
+    QCOMPARE(model.rowCount(), 2); // existe : igdb-2, igdb-3
+
+    model.setLanguageOwnedOnly(true);
+    QCOMPARE(model.rowCount(), 1); // jouable : igdb-2 seul
+    QCOMPARE(model.index(0, 0).data(GameListModel::GameKeyRole).toString(),
+             QStringLiteral("igdb-2"));
+
+    // Et une langue possédée par personne ne rend rien jouable.
+    model.setLanguageFilter({ QStringLiteral("fr") });
+    QCOMPARE(model.rowCount(), 0);
+}
+
+void TestGameListModel::languageFilter_reportsCodesItCannotHonour()
+{
+    GameListModel model;
+    feed(model);
+    feedLanguages(model);
+
+    // Une langue SANS bit ne peut pas entrer dans un ET binaire. Le modèle ne filtre donc
+    // pas — mais il le DIT. Sans ça, l'appelant lirait le catalogue entier comme un
+    // résultat de recherche, et le filtre paraîtrait fonctionner.
+    model.setLanguageFilter({ QStringLiteral("xx") });
+    QCOMPARE(model.rowCount(), 3);
+    QCOMPARE(model.unfilterableLanguages(), QStringList({ QStringLiteral("xx") }));
+
+    // Un code inconnu du référentiel tombe dans le même cas, et pour la même raison.
+    model.setLanguageFilter({ QStringLiteral("zz") });
+    QCOMPARE(model.unfilterableLanguages(), QStringList({ QStringLiteral("zz") }));
+
+    // Une langue honorable ne laisse rien derrière elle.
+    model.setLanguageFilter({ QStringLiteral("fr") });
+    QVERIFY(model.unfilterableLanguages().isEmpty());
+}
+
+void TestGameListModel::badges_orderOwnedFirstThenCatalogue()
+{
+    GameListModel model;
+    feed(model);
+    feedLanguages(model);
+    // igdb-2 porte en|fr|de|ja ; on ne possède que l'allemand.
+    model.setOwnedLanguageMasks({ { QStringLiteral("igdb-2"), 0b001000 } });
+
+    // igdb-2 = « The Legend of Zelda », deuxième par titre.
+    int row = -1;
+    for (int i = 0; i < model.rowCount(); ++i) {
+        if (model.index(i, 0).data(GameListModel::GameKeyRole).toString()
+            == QStringLiteral("igdb-2"))
+            row = i;
+    }
+    QVERIFY(row >= 0);
+
+    const QVariantList badges = model.index(row, 0).data(GameListModel::LanguagesRole).toList();
+    QCOMPARE(badges.size(), 4);
+
+    // Possédée d'abord (§8), puis l'ordre STABLE du catalogue — celui des bits.
+    QCOMPARE(badges.at(0).toMap().value("code").toString(), QStringLiteral("de"));
+    QCOMPARE(badges.at(0).toMap().value("owned").toBool(), true);
+    QCOMPARE(badges.at(1).toMap().value("code").toString(), QStringLiteral("en"));
+    QCOMPARE(badges.at(1).toMap().value("owned").toBool(), false);
+    QCOMPARE(badges.at(2).toMap().value("code").toString(), QStringLiteral("fr"));
+    QCOMPARE(badges.at(3).toMap().value("code").toString(), QStringLiteral("ja"));
+}
+
+void TestGameListModel::badges_areBoundedAndCountTheRest()
+{
+    GameListModel model;
+    feed(model);
+
+    // Un jeu à 8 langues, alors que la ligne en affiche 6 : le §8 exige une borne CONNUE
+    // À L'AVANCE, sinon la largeur d'une ligne dépend de son contenu.
+    QList<igiris::catalog::Language> many;
+    quint64                          mask = 0;
+    for (int bit = 0; bit < 8; ++bit) {
+        many.append({ QStringLiteral("l%1").arg(bit), QStringLiteral("Langue %1").arg(bit), {},
+                      bit });
+        mask |= quint64(1) << bit;
+    }
+    model.setLanguages(many, { { QStringLiteral("igdb-1"), mask } });
+
+    int row = -1;
+    for (int i = 0; i < model.rowCount(); ++i) {
+        if (model.index(i, 0).data(GameListModel::GameKeyRole).toString()
+            == QStringLiteral("igdb-1"))
+            row = i;
+    }
+    QVERIFY(row >= 0);
+
+    const QModelIndex index = model.index(row, 0);
+    QCOMPARE(index.data(GameListModel::LanguagesRole).toList().size(), model.maxBadges());
+    QCOMPARE(index.data(GameListModel::ExtraLanguageCountRole).toInt(), 8 - model.maxBadges());
+}
+
+void TestGameListModel::badges_ownedNeverExceedsTheCatalogue()
+{
+    GameListModel model;
+    feed(model);
+    feedLanguages(model);
+
+    // igdb-3 n'existe qu'en en|fr. Un masque possédé qui prétendrait au japonais
+    // signalerait deux référentiels de bits différents : le badge serait illuminé sans
+    // badge correspondant au catalogue, donc faux et invérifiable.
+    model.setOwnedLanguageMasks({ { QStringLiteral("igdb-3"), 0b100001 } });
+
+    int row = -1;
+    for (int i = 0; i < model.rowCount(); ++i) {
+        if (model.index(i, 0).data(GameListModel::GameKeyRole).toString()
+            == QStringLiteral("igdb-3"))
+            row = i;
+    }
+    QVERIFY(row >= 0);
+
+    const QVariantList badges = model.index(row, 0).data(GameListModel::LanguagesRole).toList();
+    QCOMPARE(badges.size(), 2); // en, fr — jamais ja
+    for (const QVariant &badge : badges)
+        QVERIFY(badge.toMap().value("code").toString() != QStringLiteral("ja"));
+}
 
 void TestGameListModel::model_respectsAbstractItemModelContract()
 {
@@ -303,12 +534,20 @@ void TestGameListModel::clearFilters_restoresEverything()
     model.setArcadeOnly(true);
     model.setOwnership(GameListModel::MissingOnly);
 
+    // Les filtres de langue partent avec les autres : en oublier un laisserait une liste
+    // filtrée derrière une barre qui affiche « tout ».
+    feedLanguages(model);
+    model.setLanguageFilter({ QStringLiteral("ja") });
+    model.setLanguageOwnedOnly(true);
+
     model.clearFilters();
     QCOMPARE(model.rowCount(), 3);
     QVERIFY(model.filter().isEmpty());
     QVERIFY(model.platformFilter().isEmpty());
     QCOMPARE(model.decadeFilter(), 0);
     QVERIFY(!model.arcadeOnly());
+    QVERIFY(model.languageFilter().isEmpty());
+    QVERIFY(!model.languageOwnedOnly());
 }
 
 QTEST_MAIN(TestGameListModel)

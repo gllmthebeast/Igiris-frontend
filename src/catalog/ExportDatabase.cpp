@@ -94,6 +94,8 @@ bool ExportDatabase::open(const QString &path, QString *error)
         return false;
     }
 
+    m_hasLanguages = detectLanguageTables();
+
     if (m_meta.major != schema::kSupportedMajor) {
         const QString message =
             QStringLiteral("schéma d'export %1 : version MAJEURE %2 inconnue, ce binaire "
@@ -143,6 +145,10 @@ bool ExportDatabase::readMeta(QString *error)
             m_meta.arcadeRomsets = value.toInt();
         else if (key == QLatin1String("dat_sets"))
             m_meta.datSets = value.toInt();
+        else if (key == QLatin1String("languages"))
+            m_meta.languages = value.toInt();
+        else if (key == QLatin1String("game_languages"))
+            m_meta.gameLanguages = value.toInt();
     }
     sqlite3_finalize(stmt);
 
@@ -451,6 +457,150 @@ QList<RomHash> ExportDatabase::romHashesForGame(const QString &gameKey) const
     }
     sqlite3_finalize(stmt);
     return hashes;
+}
+
+bool ExportDatabase::detectLanguageTables() const
+{
+    if (!m_db)
+        return false;
+
+    // Sur les TABLES, pas sur le numéro de version : un export dont la mineure annonce des
+    // langues mais dont les tables manqueraient ferait planter chaque requête au lieu de
+    // dégrader proprement. C'est la présence qui décide.
+    sqlite3_stmt *stmt =
+        prepare(m_db, QStringLiteral("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' "
+                                     "AND name IN ('exp_language','exp_game_language')"));
+    if (!stmt)
+        return false;
+
+    int tables = 0;
+    if (sqlite3_step(stmt) == SQLITE_ROW)
+        tables = sqlite3_column_int(stmt, 0);
+    sqlite3_finalize(stmt);
+
+    if (tables < 2)
+        return false;
+
+    // exp_game.lang_mask est une colonne AJOUTÉE : sans elle, les deux tables ne suffisent
+    // pas — le filtre statique n'aurait rien à interroger.
+    stmt = prepare(m_db, QStringLiteral("SELECT COUNT(*) FROM pragma_table_info('exp_game') "
+                                        "WHERE name = 'lang_mask'"));
+    if (!stmt)
+        return false;
+    int column = 0;
+    if (sqlite3_step(stmt) == SQLITE_ROW)
+        column = sqlite3_column_int(stmt, 0);
+    sqlite3_finalize(stmt);
+
+    return column == 1;
+}
+
+QList<Language> ExportDatabase::languages() const
+{
+    QList<Language> languages;
+    if (!m_db || !m_hasLanguages)
+        return languages;
+
+    // Les langues sans bit passent en fin de liste — elles existent, mais aucune ordre de
+    // masque ne les positionne.
+    sqlite3_stmt *stmt =
+        prepare(m_db, QStringLiteral("SELECT lang_code, label, badge_asset, bit_index "
+                                     "FROM exp_language "
+                                     "ORDER BY bit_index IS NULL, bit_index, lang_code"));
+    if (!stmt)
+        return languages;
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        Language language;
+        language.code       = columnText(stmt, 0);
+        language.label      = columnText(stmt, 1);
+        language.badgeAsset = columnText(stmt, 2);
+        // NULL n'est PAS le bit 0 : c'est l'absence de bit (réponse du backend, §4).
+        language.bitIndex = sqlite3_column_type(stmt, 3) == SQLITE_NULL
+                                ? -1
+                                : sqlite3_column_int(stmt, 3);
+        languages.append(language);
+    }
+    sqlite3_finalize(stmt);
+    return languages;
+}
+
+QHash<QString, quint64> ExportDatabase::langMaskByGame() const
+{
+    QHash<QString, quint64> masks;
+    if (!m_db || !m_hasLanguages)
+        return masks;
+
+    sqlite3_stmt *stmt = prepare(m_db, QStringLiteral("SELECT game_key, lang_mask FROM exp_game "
+                                                      "WHERE lang_mask IS NOT NULL "
+                                                      "AND lang_mask <> 0"));
+    if (!stmt)
+        return masks;
+
+    while (sqlite3_step(stmt) == SQLITE_ROW)
+        masks.insert(columnText(stmt, 0),
+                     static_cast<quint64>(sqlite3_column_int64(stmt, 1)));
+
+    sqlite3_finalize(stmt);
+    return masks;
+}
+
+QHash<QString, quint64> ExportDatabase::ownedLangMaskByGame(const QSet<QString> &ownedRomKeys) const
+{
+    QHash<QString, quint64> masks;
+    if (!m_db || !m_hasLanguages || ownedRomKeys.isEmpty())
+        return masks;
+
+    // Les langues sans bit sont écartées ici, et seulement ici : elles ne peuvent pas
+    // entrer dans un masque. La fiche de jeu les montre quand même — voir
+    // languagesForGame(), qui ne passe pas par le masque.
+    const QString sql = QStringLiteral(
+                            "SELECT gl.game_key, gl.crc32, gl.%1, l.bit_index "
+                            "FROM exp_game_language gl "
+                            "JOIN exp_language l ON l.lang_code = gl.lang_code "
+                            "WHERE l.bit_index IS NOT NULL")
+                            .arg(platformColumn());
+
+    sqlite3_stmt *stmt = prepare(m_db, sql);
+    if (!stmt)
+        return masks;
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const QString key = romKey(columnText(stmt, 1), columnText(stmt, 2));
+        if (!ownedRomKeys.contains(key))
+            continue;
+        masks[columnText(stmt, 0)] |= quint64(1) << sqlite3_column_int(stmt, 3);
+    }
+    sqlite3_finalize(stmt);
+    return masks;
+}
+
+QList<GameLanguage> ExportDatabase::languagesForGame(const QString &gameKey) const
+{
+    QList<GameLanguage> languages;
+    if (!m_db || !m_hasLanguages)
+        return languages;
+
+    // game_key est le préfixe de la clé primaire : cette requête-ci est un lookup, pas un
+    // balayage.
+    const QString sql = QStringLiteral("SELECT lang_code, %1, crc32 FROM exp_game_language "
+                                       "WHERE game_key = ? ORDER BY %1, lang_code")
+                            .arg(platformColumn());
+
+    sqlite3_stmt *stmt = prepare(m_db, sql);
+    if (!stmt)
+        return languages;
+
+    bindText(stmt, 1, gameKey);
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        GameLanguage language;
+        language.langCode    = columnText(stmt, 0);
+        language.platformKey = columnText(stmt, 1);
+        language.crc32       = columnText(stmt, 2);
+        languages.append(language);
+    }
+    sqlite3_finalize(stmt);
+    return languages;
 }
 
 QList<Romset> ExportDatabase::romsetsForGame(const QString &gameKey) const

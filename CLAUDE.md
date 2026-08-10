@@ -4,7 +4,7 @@
 > **Frontend embarqué** (Batocera / Raspberry Pi en premier, mais pas uniquement — §1).
 > Le backend est un projet **SÉPARÉ** : `/opt/igiris` sur cette même VM, avec son propre
 > `CLAUDE.md`. Ce projet ne démarre vraiment qu'une fois l'export générable de bout en bout
-> — ce qui est le cas aujourd'hui (schéma 1.3.0, cf. `data/`).
+> — ce qui est le cas aujourd'hui (schéma **1.4.0**, cf. `data/`).
 
 ---
 
@@ -111,7 +111,7 @@ Un **artefact de build**, régénéré côté serveur, que l'appareil téléchar
 bloc. Il ne se modifie jamais sur l'appareil.
 
 ```
-https://igiris.xyz/exports/games.db        ~6,8 Mo
+https://igiris.xyz/exports/games.db        ~9,6 Mo
 https://igiris.xyz/exports/manifest.json   version, sha256, horodatage
 ```
 
@@ -140,11 +140,11 @@ l'ancien. Un export tronqué ne doit jamais devenir l'export courant.
 
 ---
 
-## 3. Le schéma **réellement livré** — version 1.3.0
+## 3. Le schéma **réellement livré** — version 1.4.0
 
-⚠️ Ceci est le schéma vérifié dans `data/games.db` au 2026-08-06. Pour ce qui est *demandé*
-au backend mais **pas encore livré** (`platform_key`, tables de langues), voir §9 — et ne
-pas coder contre ces champs avant qu'ils existent.
+⚠️ Ceci est le schéma vérifié dans `data/games.db` au 2026-08-10. Pour ce qui est *demandé*
+au backend mais **pas encore livré** (`platform_key`), voir §9 — et ne pas coder contre ces
+champs avant qu'ils existent.
 
 ```sql
 exp_meta(key, value)
@@ -172,7 +172,29 @@ exp_rom_hash(crc32, batocera_system, game_key, header_skip)
 exp_romset(romset, batocera_system, game_key, emulators, hardware, driver_status)
     -- PRIMARY KEY (romset, batocera_system)
     -- ARCADE uniquement, identification par NOM DE FICHIER (voir §4)
+
+-- ------------------------------------------------------------------ ajouts du 1.4.0 (§8)
+
+exp_language(lang_code, label, badge_asset, bit_index)
+    -- 25 codes. bit_index attribué À VIE, et NULL sur 3 d'entre eux :
+    -- NULL = PAS DE BIT, jamais le bit 0. La langue reste dans exp_game_language,
+    -- donc visible en fiche, mais elle est absente de lang_mask.
+
+exp_game_language(game_key, lang_code, batocera_system, crc32)
+    -- PRIMARY KEY sur les quatre colonnes, WITHOUT ROWID. 92 850 lignes.
+    -- QUELLE ROM fournit QUELLE langue — même granularité que exp_rom_hash, c'est ce qui
+    -- rend l'illumination du §8 calculable sans rien recalculer.
+    -- ⚠ la clé commence par game_key : chercher par crc32 y BALAIE la table.
+
+exp_game.lang_mask
+    -- masque de bits des langues au catalogue. 5 986 jeux sur 7 581 (79 %).
 ```
+
+> **Ce que l'export ne dit pas, et ne dira pas.** Le backend a tranché : aucune langue
+> n'est déduite pour les régions `Europe`, `World` et `Asia`, qui sont multilingues. Un jeu
+> européen sans balise de langues dans son dat n'aura donc **aucun badge**. Ce n'est pas
+> une donnée manquante à compenser sur l'appareil — c'est une information que le dat ne
+> contient pas, et un badge faux serait invérifiable par l'utilisateur.
 
 ### Requêtes types
 
@@ -323,9 +345,9 @@ illuminé/grisé que §8 mais restreinte à cette plateforme.
 
 ## 8. Badges de langue
 
-> ⚠️ **Dépend de données qui n'existent pas encore dans l'export 1.3.0.** Voir §9. Cette
-> section est la spécification cible ; l'étape 6 de l'ordre de travail (§14) est bloquée
-> tant que le backend n'a pas livré.
+> ✅ **Livré au lot 8** (frontend 1.1.0), sur l'export 1.4.0. Cette section décrit
+> désormais ce qui EST implémenté ; les décisions prises en chemin sont notées en fin de
+> section.
 
 ### Sémantique — deux états, un seul axe
 
@@ -409,6 +431,21 @@ Sur Raspberry Pi, une liste qui défile avec N badges par ligne est un piège à
 Il n'y a rien d'autre à calculer. Pas de parsing, pas de normalisation, pas de
 correspondance région → langue : tout est résolu en amont.
 
+### Ce qui a été décidé à l'implémentation
+
+| Sujet | Décision | Pourquoi |
+|---|---|---|
+| Asset des badges | **Texte**, pas d'atlas d'images | Qt rend les glyphes depuis un atlas de texture unique : la propriété recherchée par la règle « atlas » est déjà là, sans le moindre fichier à redistribuer (§16) |
+| Borne d'affichage | **6 badges** + `+N` | Mesuré : la moitié du catalogue badgé tient dans 5 langues, mais un jeu monte à 22. La zone est à largeur **réservée**, donc le titre s'élide toujours au même endroit |
+| Langues sans `bit_index` | **Absentes de la vue liste, présentes en fiche** | Un masque ne peut pas porter ce qu'il ne contient pas. La fiche lit `exp_game_language` directement, elle n'a donc pas cette limite. Concerne **7 lignes sur 92 850** |
+| Filtre sur une langue non masquable | Le modèle **ne filtre pas, et le dit** (`unfilterableLanguages`) | Ignorer en silence renverrait le catalogue entier, qui se lirait comme un résultat de recherche : le filtre *paraîtrait* marcher |
+| Masque possédé | Toujours **intersecté** avec le masque du catalogue | Un badge illuminé sans badge correspondant serait faux et invérifiable ; c'est le symptôme d'un décalage de bits, et il doit disparaître à l'affichage plutôt que mentir |
+
+**Coût mesuré**, comme l'exige la note d'ordonnancement du §17 : **1,1 µs par ligne** pour
+construire ses badges (20 965 badges sur les 7 581 lignes du catalogue, 8 ms au total sur
+la VM de développement). Les badges ne sont construits que pour les lignes **visibles** —
+une quinzaine à l'écran — donc le coût réel au défilement est très en dessous de ce chiffre.
+
 ---
 
 ## 9. Écarts entre le contrat livré et le contrat cible
@@ -438,18 +475,28 @@ lisant le fichier de description.
 connaître le nom `batocera_system`. Il expose `platform_key` au reste du code, dès
 maintenant. Le renommage côté backend deviendra alors un changement d'une ligne.
 
-### 9.2 — Tables de langues (ajout **MINEUR**, 1.4.0)
+### 9.2 — Tables de langues — ✅ **LIVRÉ** en 1.4.0
 
-Rien de tout ceci n'existe dans l'export 1.3.0 :
+Demandé le 2026-08-08 (`docs/demandes-backend/export-1.4.0-langues.md`), livré le
+2026-08-09 (`…-REPONSE.md`). Les trois objets existent, au schéma spécifié — voir §3.
 
-| Objet demandé | Contenu |
-|---|---|
-| `exp_language` | référentiel : code, libellé, asset de badge, **`bit_index`** |
-| `exp_game_language` | `(game_key, lang_code, platform_key, crc32)` — quelle ROM fournit quelle langue |
-| `exp_game.lang_mask` | masque de bits des langues existant au catalogue pour ce jeu |
+Deux écarts avec la demande, tous deux **assumés et documentés** :
 
-C'est **additif** → version mineure → ne casse pas ce projet. À demander avant d'attaquer
-l'étape 6 du plan de travail.
+- la troisième colonne d'`exp_game_language` s'appelle `batocera_system` et non
+  `platform_key`, **délibérément** : elle porte le même nom que dans les trois tables
+  existantes, plutôt que d'introduire deux conventions dans un même export. Le renommage
+  se fera d'un bloc en 2.0.0 (§9.1), et la façade du chargeur l'absorbe déjà ;
+- `bit_index` n'est attribué qu'aux langues **affichables** (option 1 de la demande) : 22
+  des 25 codes en portent un, 39 bits restent libres. Le débordement silencieux redouté ne
+  peut plus arriver.
+
+**Livré au passage, sans que ce soit demandé** : `is_preferred` est corrigé. Il valait 1
+sur 97,6 % des lignes parce que le marquage testait `elo = MAX(elo)`, et qu'un variant
+jamais comparé reste à l'elo de départ — le champ décrivait donc **l'absence de vote**.
+Il ne marque plus que 31 lignes, avec unicité garantie. Conséquence pour le §7 : le repli
+« premier système jouable, puis meilleur `emu_score` » n'est plus un pis-aller, **c'est le
+cas normal** — et `is_preferred = 1` signifie désormais « la communauté a réellement
+tranché ».
 
 ### 9.3 — Header SNES
 
@@ -576,8 +623,8 @@ parfaitement rester en C# — ils ne tournent pas sur l'appareil.
 |---|---|---|
 | Où | `/opt/igiris` | `~/igiris-frontend` |
 | Rôle | catalogue, votes, dats, rapprochement, **génération de l'export** | consommation de l'export sur l'appareil |
-| Base | `votes.db`, ~200 Mo, en écriture | `games.db`, 6,8 Mo, **lecture seule** |
-| Dépôt | `gllmthebeast/igis` | *(à renseigner — dépôt créé, remote non configuré)* |
+| Base | `votes.db`, ~200 Mo, en écriture | `games.db`, 9,6 Mo, **lecture seule** |
+| Dépôt | `gllmthebeast/igis` | `gllmthebeast/igiris-frontend` |
 
 **Ne jamais écrire dans la base du backend depuis ce projet.** Elle est en
 `journal_mode=delete` : un écrivain bloque tous les lecteurs, et le site de vote est servi
@@ -653,8 +700,7 @@ des icônes redistribuables commercialement, ou les produire en propre.
    (§9.1).
 4. Scanner de ROMs incrémental par hash → statuts vert / rouge / noir.
 5. Interface QML : liste + recherche.
-6. Badges de langue en vue liste — **bloqué tant que `exp_game_language` n'est pas livré**
-   (§9.2).
+6. Badges de langue en vue liste — ✅ **fait** (lot 8, sur l'export 1.4.0).
 7. Filtres — statiques d'abord, dynamiques ensuite.
 8. Fiche de jeu + lancement effectif + détail des langues par plateforme.
 9. **Second adaptateur (Recalbox)** — voir ci-dessous.

@@ -1,5 +1,8 @@
 #include "ui/GameListModel.h"
 
+#include <QLocale>
+#include <QVariantMap>
+
 #include <algorithm>
 
 namespace igiris::ui {
@@ -7,6 +10,9 @@ namespace igiris::ui {
 GameListModel::GameListModel(QObject *parent)
     : QAbstractListModel(parent)
 {
+    // « fr_FR » → « fr ». Sert uniquement à ORDONNER les badges : aucune langue n'est
+    // déduite de la locale, et surtout aucune n'est masquée à cause d'elle.
+    m_interfaceLanguage = QLocale::system().name().section(QLatin1Char('_'), 0, 0);
 }
 
 void GameListModel::setCatalogue(QList<catalog::Game>        games,
@@ -41,6 +47,7 @@ void GameListModel::setCatalogue(QList<catalog::Game>        games,
 
         m_games.append(std::move(entry));
     }
+    applyLanguageMasks();
     endResetModel();
 
     m_availablePlatforms = QStringList(platforms.cbegin(), platforms.cend());
@@ -64,6 +71,110 @@ void GameListModel::setOwnedGameKeys(QSet<QString> owned)
         m_ownershipAvailable = true;
         emit ownershipAvailableChanged();
     }
+    rebuild();
+}
+
+void GameListModel::setLanguages(QList<catalog::Language> languages,
+                                 QHash<QString, quint64>  maskByGame)
+{
+    m_languages      = std::move(languages);
+    m_langMaskByGame = std::move(maskByGame);
+
+    m_languageByBit.clear();
+    m_availableLanguages.clear();
+    for (int i = 0; i < m_languages.size(); ++i) {
+        const catalog::Language &language = m_languages.at(i);
+        if (!language.hasBit())
+            continue; // sans bit : filtrable en fiche, mais hors masque (§8)
+        m_languageByBit.insert(language.bitIndex, i);
+        m_availableLanguages.append(language.code);
+    }
+
+    beginResetModel();
+    applyLanguageMasks();
+    endResetModel();
+
+    recomputeRequiredMask();
+    emit languagesChanged();
+    rebuild();
+}
+
+void GameListModel::setOwnedLanguageMasks(QHash<QString, quint64> maskByGame)
+{
+    m_ownedLangMaskByGame = std::move(maskByGame);
+
+    beginResetModel();
+    applyLanguageMasks();
+    endResetModel();
+
+    // Comme pour la possession : un scan qui ne trouve aucune langue reste un scan. C'est
+    // l'information « aucune ROM possédée ne fournit cette langue », pas « indisponible ».
+    if (!m_ownedLanguagesAvailable) {
+        m_ownedLanguagesAvailable = true;
+        emit ownedLanguagesAvailableChanged();
+    }
+    rebuild();
+}
+
+void GameListModel::applyLanguageMasks()
+{
+    for (Entry &entry : m_games) {
+        entry.langMask      = m_langMaskByGame.value(entry.game.gameKey, 0);
+        entry.ownedLangMask = m_ownedLangMaskByGame.value(entry.game.gameKey, 0);
+        // Garde-fou : une langue possédée qui ne serait pas au catalogue signifierait que
+        // les deux masques ne parlent pas du même référentiel de bits. On ne peut pas
+        // l'afficher — un badge illuminé sans badge correspondant est un badge faux.
+        entry.ownedLangMask &= entry.langMask;
+    }
+}
+
+void GameListModel::recomputeRequiredMask()
+{
+    m_requiredLangMask = 0;
+    m_unfilterableLanguages.clear();
+
+    for (const QString &code : m_languageFilter) {
+        const quint64 before = m_requiredLangMask;
+        for (const catalog::Language &language : m_languages) {
+            if (language.code == code) {
+                m_requiredLangMask |= language.bit();
+                break;
+            }
+        }
+        // Rien n'a été allumé : code inconnu du référentiel, ou connu mais sans bit. Dans
+        // les deux cas le masque ne peut pas porter la contrainte, et le silence serait
+        // le pire des comportements — c'est exactement le décalage de bits « silencieux »
+        // contre lequel le §8 met en garde, vu de l'autre côté.
+        if (m_requiredLangMask == before)
+            m_unfilterableLanguages.append(code);
+    }
+}
+
+QString GameListModel::languageLabel(const QString &code) const
+{
+    for (const catalog::Language &language : m_languages) {
+        if (language.code == code)
+            return language.label;
+    }
+    return code;
+}
+
+void GameListModel::setLanguageFilter(const QStringList &codes)
+{
+    if (m_languageFilter == codes)
+        return;
+    m_languageFilter = codes;
+    recomputeRequiredMask();
+    emit languageFilterChanged();
+    rebuild();
+}
+
+void GameListModel::setLanguageOwnedOnly(bool ownedOnly)
+{
+    if (m_languageOwnedOnly == ownedOnly)
+        return;
+    m_languageOwnedOnly = ownedOnly;
+    emit languageOwnedOnlyChanged();
     rebuild();
 }
 
@@ -119,6 +230,8 @@ void GameListModel::clearFilters()
     setDecadeFilter(0);
     setArcadeOnly(false);
     setOwnership(AnyOwnership);
+    setLanguageFilter({});
+    setLanguageOwnedOnly(false);
 }
 
 bool GameListModel::matches(const Entry &entry) const
@@ -149,6 +262,20 @@ bool GameListModel::matches(const Entry &entry) const
             return false;
     }
 
+    if (m_requiredLangMask != 0) {
+        // « jouable en X » n'a pas de sens tant qu'aucun scan n'a eu lieu : on ne filtre
+        // pas, plutôt que d'affirmer à tort que rien n'est jouable — même règle que la
+        // possession, ci-dessus.
+        if (m_languageOwnedOnly && !m_ownedLanguagesAvailable)
+            return true;
+
+        const quint64 available = m_languageOwnedOnly ? entry.ownedLangMask : entry.langMask;
+        // ET binaire, et TOUTES les langues exigées : c'est le §8, et c'est aussi ce qui
+        // rend la combinaison multi-langues gratuite.
+        if ((available & m_requiredLangMask) != m_requiredLangMask)
+            return false;
+    }
+
     return true;
 }
 
@@ -165,6 +292,39 @@ void GameListModel::rebuild()
 
     endResetModel();
     emit countsChanged();
+}
+
+QList<int> GameListModel::orderedLanguageBits(const Entry &entry) const
+{
+    QList<int> bits;
+    if (entry.langMask == 0)
+        return bits;
+
+    // Parcours par bit croissant : c'est l'ordre du catalogue, et il est STABLE d'un
+    // export à l'autre puisque bit_index est attribué à vie.
+    for (int bit = 0; bit < 64; ++bit) {
+        if ((entry.langMask & (quint64(1) << bit)) == 0)
+            continue;
+        if (m_languageByBit.contains(bit))
+            bits.append(bit);
+        // Un bit allumé qu'aucune langue du référentiel ne réclame est ignoré : il
+        // signalerait un référentiel plus ancien que le masque. L'ignorer perd un badge ;
+        // l'afficher en inventerait un.
+    }
+
+    const QString &uiLanguage = m_interfaceLanguage;
+    const auto     rank       = [this, &entry, &uiLanguage](int bit) {
+        if ((entry.ownedLangMask & (quint64(1) << bit)) != 0)
+            return 0; // possédée
+        if (m_languages.at(m_languageByBit.value(bit)).code == uiLanguage)
+            return 1; // langue de l'interface
+        return 2;
+    };
+
+    std::stable_sort(bits.begin(), bits.end(), [&rank](int a, int b) {
+        return rank(a) < rank(b);
+    });
+    return bits;
 }
 
 int GameListModel::rowCount(const QModelIndex &parent) const
@@ -190,6 +350,27 @@ QVariant GameListModel::data(const QModelIndex &index, int role) const
         return entry.game.rating;
     case OwnedRole:
         return m_ownershipAvailable && m_owned.contains(entry.game.gameKey);
+    case LanguagesRole: {
+        // Construit à la demande, donc SEULEMENT pour les lignes visibles : le §8 met en
+        // garde contre le coût des badges au défilement. Rien n'est stocké par jeu.
+        QVariantList badges;
+        const QList<int> bits = orderedLanguageBits(entry);
+        for (int i = 0; i < bits.size() && i < kMaxBadges; ++i) {
+            const int bit = bits.at(i);
+            QVariantMap badge;
+            badge.insert(QStringLiteral("code"),
+                         m_languages.at(m_languageByBit.value(bit)).code);
+            // Illuminé / grisé : la règle du §8, appliquée telle quelle.
+            badge.insert(QStringLiteral("owned"),
+                         (entry.ownedLangMask & (quint64(1) << bit)) != 0);
+            badges.append(badge);
+        }
+        return badges;
+    }
+    case ExtraLanguageCountRole: {
+        const int total = static_cast<int>(orderedLanguageBits(entry).size());
+        return total > kMaxBadges ? total - kMaxBadges : 0;
+    }
     default:
         return {};
     }
@@ -203,6 +384,8 @@ QHash<int, QByteArray> GameListModel::roleNames() const
         { YearRole, "year" },
         { RatingRole, "rating" },
         { OwnedRole, "owned" },
+        { LanguagesRole, "languages" },
+        { ExtraLanguageCountRole, "extraLanguages" },
     };
 }
 

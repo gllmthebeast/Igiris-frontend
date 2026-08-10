@@ -9,6 +9,7 @@
 
 #include <QHash>
 #include <QList>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <optional>
@@ -16,6 +17,15 @@
 struct sqlite3;
 
 namespace igiris::catalog {
+
+// Clé composite d'une ROM du catalogue : un CRC seul n'identifie rien, c'est le couple
+// (CRC, plateforme) qui est la clé de exp_rom_hash comme de exp_game_language.
+// Définie ici pour que le scan et le catalogue parlent de la MÊME clé — deux conventions
+// divergentes se seraient croisées sans jamais se rencontrer, silencieusement.
+inline QString romKey(const QString &crc32, const QString &platformKey)
+{
+    return crc32.toUpper() + QLatin1Char('\x1f') + platformKey;
+}
 
 struct ExportMeta {
     QString schemaVersion; // « 1.3.0 »
@@ -28,6 +38,9 @@ struct ExportMeta {
     int     romHashes     = 0;
     int     arcadeRomsets = 0;
     int     datSets       = 0;
+    // Présents à partir de l'export 1.4.0 seulement ; 0 avant, ce qui n'est pas une erreur.
+    int     languages     = 0;
+    int     gameLanguages = 0;
 };
 
 struct Game {
@@ -78,6 +91,30 @@ struct RomsetMatch {
     QString hardware;
     QString emulators;
     QString driverStatus;
+};
+
+// Une langue du référentiel — export 1.4.0, §8.
+//
+// `bitIndex` vaut -1 quand l'export ne lui attribue AUCUN bit. Ce n'est pas une erreur :
+// le backend ne donne un bit qu'aux langues affichables, et le §4 de sa réponse est
+// explicite — « traitez NULL comme pas de bit, pas comme le bit 0 ». Une langue sans bit
+// reste dans exp_game_language, donc visible en fiche, mais absente de lang_mask.
+struct Language {
+    QString code;  // ISO 639-1 minuscule, tel que l'export le donne
+    QString label; // libellé affichable
+    QString badgeAsset;
+    int     bitIndex = -1;
+
+    bool     hasBit() const { return bitIndex >= 0; }
+    quint64  bit() const { return hasBit() ? (quint64(1) << bitIndex) : 0; }
+};
+
+// Quelle ROM apporte quelle langue (§8). Même granularité que exp_rom_hash : c'est ce qui
+// permet de décider illuminé / grisé sans rien recalculer.
+struct GameLanguage {
+    QString langCode;
+    QString platformKey;
+    QString crc32;
 };
 
 class ExportDatabase
@@ -138,11 +175,40 @@ public:
     QList<RomHash> romHashesForGame(const QString &gameKey) const;
     QList<Romset>  romsetsForGame(const QString &gameKey) const;
 
+    // --- langues (§8) — export 1.4.0 -----------------------------------------------------
+    //
+    // Détecté à l'ouverture, et sur la PRÉSENCE DES TABLES plutôt que sur le numéro de
+    // version mineure : c'est la seule vérification qui reste vraie si l'ordre des
+    // livraisons change. Un export 1.3.0 reste lisible, sans badges (§2 : les mineures
+    // sont additives, elles ne cassent pas ce binaire).
+    bool hasLanguages() const { return m_hasLanguages; }
+
+    // Le référentiel, ordonné par bit_index — les langues sans bit à la fin.
+    QList<Language> languages() const;
+
+    // Filtre STATIQUE « existe en <langue> » : lu directement dans exp_game.lang_mask,
+    // une ligne par jeu. C'est précisément ce à quoi le masque sert (§8) — passer par
+    // exp_game_language coûterait douze fois plus de lignes pour le même résultat.
+    QHash<QString, quint64> langMaskByGame() const;
+
+    // Filtre DYNAMIQUE « jouable en <langue> » : le même masque, restreint aux langues
+    // qu'une ROM RÉELLEMENT POSSÉDÉE fournit. `ownedRomKeys` contient des romKey().
+    //
+    // Un seul parcours de exp_game_language, et non une requête par ROM possédée : la clé
+    // primaire de cette table commence par game_key, donc chercher par crc32 y déclencherait
+    // un balayage complet — autant n'en faire qu'un.
+    QHash<QString, quint64> ownedLangMaskByGame(const QSet<QString> &ownedRomKeys) const;
+
+    // Le détail par plateforme de la fiche de jeu (§7).
+    QList<GameLanguage> languagesForGame(const QString &gameKey) const;
+
 private:
     bool readMeta(QString *error);
+    bool detectLanguageTables() const;
 
     sqlite3   *m_db = nullptr;
     ExportMeta m_meta;
+    bool       m_hasLanguages = false;
 };
 
 } // namespace igiris::catalog

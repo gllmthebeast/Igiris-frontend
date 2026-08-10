@@ -163,16 +163,52 @@ Window {
                 Component.onCompleted: currentIndex = games.ownership
                 onCurrentIndexChanged: games.ownership = currentIndex
                 KeyNavigation.left: arcadeCell
+                KeyNavigation.right: languageCell
             }
-        }
 
-        // Rappel des filtres de LANGUE prévus au §6 mais impossibles aujourd'hui :
-        // ils dépendent d'exp_game_language, absent de l'export 1.3.0 (§9.2).
-        Text {
-            anchors { right: parent.right; rightMargin: 24; verticalCenter: parent.verticalCenter }
-            text: qsTr("langues : export 1.4.0 requis")
-            color: theme.dim
-            font.pixelSize: 15
+            // Les deux filtres de langue du §8. Ils sont VOISINS et non fusionnés : ce sont
+            // deux questions différentes, et les confondre est le piège que le §8 signale.
+            FilterCell {
+                id: languageCell
+                KeyNavigation.down: list
+                KeyNavigation.up: searchField
+                label: qsTr("Langue")
+                values: [""].concat(games.availableLanguages)
+                available: games.languagesAvailable
+                unavailableHint: qsTr("export sans langues")
+                textColor: theme.text; dimColor: theme.dim; focusColor: theme.selection
+                Component.onCompleted: {
+                    var i = values.indexOf(games.languageFilter.length > 0
+                                           ? games.languageFilter[0] : "")
+                    if (i > 0) currentIndex = i
+                }
+                // Le modèle attend une LISTE : plusieurs langues s'y combinent par ET
+                // binaire. L'interface n'en propose qu'une à la fois, mais la mécanique
+                // multi-langues du §8 est celle-là, pas une autre.
+                onCurrentValueChanged: games.languageFilter = currentValue === ""
+                                                              ? [] : [currentValue]
+                KeyNavigation.left: ownedCell
+                KeyNavigation.right: languageModeCell
+            }
+
+            FilterCell {
+                id: languageModeCell
+                KeyNavigation.down: list
+                KeyNavigation.up: searchField
+                // Libellés sans ambiguïté, comme l'exige le §8 : « existe » sert la
+                // découverte, « jouable » est celui qui a une valeur d'usage réelle.
+                label: qsTr("dispo.")
+                anyLabel: qsTr("existe au catalogue")
+                values: ["", qsTr("jouable ici")]
+                // Statique tant qu'aucun scan n'a eu lieu : « jouable » n'est alors pas
+                // calculable, et le prétendre afficherait une liste vide sans raison.
+                available: games.ownedLanguagesAvailable
+                unavailableHint: qsTr("aucun scan local")
+                textColor: theme.text; dimColor: theme.dim; focusColor: theme.selection
+                Component.onCompleted: if (games.languageOwnedOnly) currentIndex = 1
+                onCurrentValueChanged: games.languageOwnedOnly = currentValue !== ""
+                KeyNavigation.left: languageCell
+            }
         }
     }
 
@@ -208,9 +244,13 @@ Window {
         Keys.onEnterPressed: root.openDetail()
 
         delegate: Item {
+            id: gameRow
+
             required property string title
             required property int rating
             required property string gameKey
+            required property var languages
+            required property int extraLanguages
             required property int index
 
             width: ListView.view.width
@@ -224,7 +264,7 @@ Window {
                 anchors {
                     left: parent.left
                     leftMargin: 24
-                    right: ratingText.left
+                    right: badges.left
                     rightMargin: 24
                     verticalCenter: parent.verticalCenter
                 }
@@ -232,6 +272,46 @@ Window {
                 color: theme.text
                 font.pixelSize: 22
                 elide: Text.ElideRight
+            }
+
+            // Bandeau de badges à largeur RÉSERVÉE, calculée depuis games.maxBadges et non
+            // depuis le contenu de la ligne : c'est ce qui garantit que le titre s'élide
+            // toujours au même endroit, et qu'aucune ligne ne recalcule sa géométrie
+            // pendant le défilement (§8).
+            Row {
+                id: badges
+
+                anchors {
+                    right: ratingText.left
+                    rightMargin: 24
+                    verticalCenter: parent.verticalCenter
+                }
+                width: games.maxBadges * 36 + 34
+                height: 20
+                spacing: 6
+
+                // L'ordre du modèle est déjà celui du §8 — possédées d'abord, puis la
+                // langue de l'interface, puis l'ordre stable du catalogue. La vue ne
+                // retrie rien : elle afficherait sinon un ordre différent du filtre.
+                Repeater {
+                    model: gameRow.languages
+                    delegate: LanguageBadge {
+                        required property var modelData
+                        code: modelData.code
+                        owned: modelData.owned
+                        textColor: theme.text
+                        dimColor: theme.dim
+                    }
+                }
+
+                // Le « +N » du §8 : les langues qui ne tiennent pas dans la borne.
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: gameRow.extraLanguages > 0
+                    text: "+" + gameRow.extraLanguages
+                    color: theme.dim
+                    font.pixelSize: 13
+                }
             }
 
             Text {

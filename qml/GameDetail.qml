@@ -67,16 +67,21 @@ FocusScope {
         highlight: Rectangle { color: sheet.selection }
 
         delegate: Item {
+            id: platformRow
+
             required property string platformKey
             required property string displayName
             required property int emuScore
             required property int status
             required property bool isDefaultChoice
             required property string romPath
+            required property var languages
             required property int index
 
             width: ListView.view.width
-            height: 56
+            // Deux hauteurs seulement, selon qu'il y ait ou non des langues : la fiche
+            // compte quelques lignes, pas 7 581 — le coût d'un layout variable y est nul.
+            height: languages.length > 0 ? 68 : 56
 
             // 0 noir, 1 rouge, 2 vert — l'ordre de l'énumération du modèle.
             Rectangle {
@@ -89,11 +94,38 @@ FocusScope {
                 border.color: sheet.dimColor
             }
 
-            Text {
+            Column {
                 anchors { left: parent.left; leftMargin: 72; verticalCenter: parent.verticalCenter }
-                text: parent.displayName + "  ·  " + parent.platformKey
-                color: sheet.textColor
-                font.pixelSize: 20
+                spacing: 6
+
+                Text {
+                    text: platformRow.displayName + "  ·  " + platformRow.platformKey
+                    color: sheet.textColor
+                    font.pixelSize: 20
+                }
+
+                // §7 : le détail « quelle release apporte quelles langues » appartient à la
+                // fiche. Même sémantique illuminé/grisé qu'en vue liste, mais RESTREINTE à
+                // cette plateforme — un badge illuminé ici veut dire « la ROM que vous
+                // possédez SUR CE SYSTÈME fournit cette langue ».
+                //
+                // Aucune borne, contrairement à la vue liste : la fiche peut se permettre
+                // d'être exhaustive, et c'est justement ce qu'on vient y chercher.
+                Row {
+                    spacing: 6
+                    visible: platformRow.languages.length > 0
+
+                    Repeater {
+                        model: platformRow.languages
+                        delegate: LanguageBadge {
+                            required property var modelData
+                            code: modelData.code
+                            owned: modelData.owned
+                            textColor: sheet.textColor
+                            dimColor: sheet.dimColor
+                        }
+                    }
+                }
             }
 
             Text {
@@ -133,7 +165,7 @@ FocusScope {
                   bottom: parent.bottom; bottomMargin: 24 }
         text: sheet.lastMessage.length > 0
               ? sheet.lastMessage
-              : qsTr("Entrée : lancer · Échap : retour")
+              : qsTr("Entrée : lancer · Échap : retour · badge plein = langue fournie par une ROM possédée")
         color: sheet.lastMessage.length > 0 ? "#d8a657" : sheet.dimColor
         font.pixelSize: 16
         wrapMode: Text.WordWrap

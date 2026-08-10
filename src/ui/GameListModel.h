@@ -12,8 +12,14 @@
 //              Indisponible tant qu'aucun scan n'a eu lieu, et l'interface doit le DIRE
 //              plutôt que de proposer un filtre qui ne filtre rien.
 //
-// Les filtres de LANGUE, également prévus au §6, sont absents : ils dépendent de
-// exp_game_language, qui n'existe pas dans l'export 1.3.0 (§9.2). Ils arriveront au lot 8.
+// Les filtres de LANGUE du §6 sont les DEUX natures appliquées au même axe, et c'est ce
+// qui les rend faciles à confondre dans l'interface :
+//
+//   « existe en fr »   STATIQUE   exp_game.lang_mask                → sert la découverte
+//   « jouable en fr »  DYNAMIQUE  masque restreint aux ROMs possédées → la valeur d'usage
+//
+// Le §8 l'impose : « ce qui illumine un badge est exactement ce qui fait passer un jeu à
+// travers le filtre ». Une seule règle — un ET binaire de masques — deux points d'appel.
 
 #include "catalog/ExportDatabase.h"
 
@@ -48,6 +54,32 @@ class GameListModel : public QAbstractListModel
 
     Q_PROPERTY(bool arcadeOnly READ arcadeOnly WRITE setArcadeOnly NOTIFY arcadeOnlyChanged)
 
+    // --- langue : un axe, deux natures (§6, §8) -----------------------------------------
+    // Liste vide = pas de filtre. Plusieurs codes = TOUS exigés, par ET binaire sur le
+    // masque, jamais par jointures répétées (§8).
+    Q_PROPERTY(QStringList languageFilter READ languageFilter WRITE setLanguageFilter
+                   NOTIFY languageFilterChanged)
+    // Faux : « existe au catalogue » (statique). Vrai : « jouable » (dynamique).
+    Q_PROPERTY(bool languageOwnedOnly READ languageOwnedOnly WRITE setLanguageOwnedOnly
+                   NOTIFY languageOwnedOnlyChanged)
+    // Codes proposables, dans l'ordre du catalogue — celui des bits, pas l'alphabétique.
+    Q_PROPERTY(QStringList availableLanguages READ availableLanguages NOTIFY languagesChanged)
+    // Codes DEMANDÉS au filtre mais impossibles à honorer, faute de bit dans le masque.
+    // Le filtre les ignore — un masque ne peut pas exprimer ce qu'il ne contient pas — et
+    // « ignorer » veut dire renvoyer TOUT le catalogue. Sans cette propriété, l'appelant
+    // lirait ce « tout » comme un résultat de recherche : le filtre paraîtrait marcher.
+    Q_PROPERTY(QStringList unfilterableLanguages READ unfilterableLanguages
+                   NOTIFY languageFilterChanged)
+    // Faux sur un export sans tables de langues : l'interface le dit au lieu d'afficher un
+    // filtre vide et des lignes sans badge sans explication.
+    Q_PROPERTY(bool languagesAvailable READ languagesAvailable NOTIFY languagesChanged)
+    // Faux tant qu'aucun scan n'a eu lieu : « jouable en fr » n'est alors pas calculable.
+    Q_PROPERTY(bool ownedLanguagesAvailable READ ownedLanguagesAvailable
+                   NOTIFY ownedLanguagesAvailableChanged)
+    // Nombre de badges affichés par ligne, CONNU À L'AVANCE : le §8 interdit un calcul de
+    // layout variable pendant le défilement.
+    Q_PROPERTY(int maxBadges READ maxBadges CONSTANT)
+
     // --- filtre dynamique --------------------------------------------------------------
     Q_PROPERTY(int ownership READ ownership WRITE setOwnership NOTIFY ownershipChanged)
     // Faux tant qu'aucun scan local n'a alimenté le modèle. L'interface s'adapte au lieu
@@ -61,6 +93,11 @@ public:
         YearRole,
         RatingRole,
         OwnedRole,
+        // Badges de la ligne : liste bornée de { code, owned }. Deux états et deux
+        // seulement — illuminé si une ROM possédée fournit la langue, grisé sinon (§8).
+        LanguagesRole,
+        // Le « +N » : les langues du jeu qui ne tiennent pas dans la ligne.
+        ExtraLanguageCountRole,
     };
 
     enum Ownership {
@@ -79,6 +116,13 @@ public:
 
     // Résultat du scan local. Active le filtre dynamique.
     void setOwnedGameKeys(QSet<QString> owned);
+
+    // Le référentiel de langues et le masque STATIQUE de chaque jeu. Appelable avant ou
+    // après setCatalogue() : les masques sont conservés et réappliqués.
+    void setLanguages(QList<catalog::Language> languages, QHash<QString, quint64> maskByGame);
+
+    // Le masque DYNAMIQUE, issu du croisement export × ROMs possédées. Active « jouable ».
+    void setOwnedLanguageMasks(QHash<QString, quint64> maskByGame);
 
     int      rowCount(const QModelIndex &parent = QModelIndex()) const override;
     QVariant data(const QModelIndex &index, int role) const override;
@@ -105,6 +149,19 @@ public:
     void setOwnership(int ownership);
     bool ownershipAvailable() const { return m_ownershipAvailable; }
 
+    QStringList languageFilter() const { return m_languageFilter; }
+    void        setLanguageFilter(const QStringList &codes);
+    bool        languageOwnedOnly() const { return m_languageOwnedOnly; }
+    void        setLanguageOwnedOnly(bool ownedOnly);
+    QStringList availableLanguages() const { return m_availableLanguages; }
+    QStringList unfilterableLanguages() const { return m_unfilterableLanguages; }
+    bool        languagesAvailable() const { return !m_languages.isEmpty(); }
+    bool        ownedLanguagesAvailable() const { return m_ownedLanguagesAvailable; }
+    int         maxBadges() const { return kMaxBadges; }
+
+    // Libellé affichable d'un code — pour l'interface, qui ne doit pas inventer de table.
+    Q_INVOKABLE QString languageLabel(const QString &code) const;
+
     // Remet tous les filtres à zéro, recherche comprise.
     Q_INVOKABLE void clearFilters();
 
@@ -117,17 +174,36 @@ signals:
     void ownershipChanged();
     void ownershipAvailableChanged();
     void catalogueChanged();
+    void languageFilterChanged();
+    void languageOwnedOnlyChanged();
+    void languagesChanged();
+    void ownedLanguagesAvailableChanged();
 
 private:
+    // Borne d'affichage du §8. Mesurée sur l'export réel : la moitié du catalogue badgé
+    // tient dans 5 langues, mais un jeu monte à 22. Sans borne, la largeur d'une ligne
+    // dépendrait du jeu, donc le layout serait recalculé pendant le défilement.
+    static constexpr int kMaxBadges = 6;
+
     struct Entry {
         catalog::Game game;
         QStringList   platformKeys;
         bool          isArcade = false;
         int           decade   = 0;
+        // Deux masques, jamais de liste de chaînes : ce sont eux qui rendent le filtre et
+        // le badge calculables au défilement sans allouer.
+        quint64 langMask      = 0;
+        quint64 ownedLangMask = 0;
     };
 
     bool matches(const Entry &entry) const;
     void rebuild();
+    // Les bits de langue d'un jeu, dans l'ordre d'affichage du §8 : possédées d'abord,
+    // puis la langue de l'interface, puis l'ordre stable du catalogue.
+    QList<int> orderedLanguageBits(const Entry &entry) const;
+    void applyLanguageMasks();
+    // Le masque exigé par le filtre, recalculé quand le filtre ou le référentiel change.
+    void recomputeRequiredMask();
 
     QList<Entry> m_games;
     QList<int>   m_visible;
@@ -142,6 +218,20 @@ private:
     QList<int>    m_availableDecades;
     QSet<QString> m_owned;
     bool          m_ownershipAvailable = false;
+
+    QList<catalog::Language> m_languages;         // ordre du catalogue = ordre des bits
+    QHash<int, int>          m_languageByBit;     // bit → index dans m_languages
+    QStringList              m_availableLanguages;
+    QHash<QString, quint64>  m_langMaskByGame;
+    QHash<QString, quint64>  m_ownedLangMaskByGame;
+    QStringList              m_languageFilter;
+    QStringList              m_unfilterableLanguages;
+    quint64                  m_requiredLangMask = 0;
+    bool                     m_languageOwnedOnly = false;
+    bool                     m_ownedLanguagesAvailable = false;
+    // Langue de l'interface : elle passe devant les autres dans l'ordre des badges (§8),
+    // après les langues possédées.
+    QString m_interfaceLanguage;
 };
 
 } // namespace igiris::ui

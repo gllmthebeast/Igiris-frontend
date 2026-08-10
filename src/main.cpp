@@ -22,6 +22,8 @@
 #include <QHash>
 #include <QSet>
 #include <QUrl>
+#include <QVariantList>
+#include <QVariantMap>
 
 #include "catalog/ExportDatabase.h"
 #include "scan/RomScanner.h"
@@ -191,6 +193,67 @@ int runExportCommand(const QString &path)
     std::printf("    aller-retour romset : %d/%d cohérents\n", romsetsMatched,
                 romsetsChecked);
 
+    // Lot 8 — les langues. Ce bloc VÉRIFIE le contrat plutôt que de l'afficher : deux
+    // erreurs de ce schéma sont silencieuses à l'écran, et ce sont les deux plus graves.
+    if (!db.hasLanguages()) {
+        std::printf("\n[5] langues : absentes de cet export (schéma %s)\n",
+                    qPrintable(meta.schemaVersion));
+    } else {
+        const auto languages = db.languages();
+        std::printf("\n[5] langues : %lld codes · %d liens ROM↔langue\n",
+                    static_cast<long long>(languages.size()), meta.gameLanguages);
+
+        // a) bit_index UNIQUE. Deux langues sur le même bit rendraient tous les badges
+        //    faux sans qu'aucune requête n'échoue.
+        QHash<int, QString> byBit;
+        int                 withoutBit = 0;
+        for (const auto &language : languages) {
+            if (!language.hasBit()) {
+                ++withoutBit;
+                continue;
+            }
+            if (byBit.contains(language.bitIndex)) {
+                std::fprintf(stderr,
+                             "\n✗ bit %d attribué à « %s » ET à « %s » : tous les masques "
+                             "sont ininterprétables.\n",
+                             language.bitIndex, qPrintable(byBit.value(language.bitIndex)),
+                             qPrintable(language.code));
+                return 1;
+            }
+            byBit.insert(language.bitIndex, language.code);
+        }
+        std::printf("    %lld avec bit · %d sans bit (hors masque, mais visibles en fiche)\n",
+                    static_cast<long long>(byBit.size()), withoutBit);
+
+        // b) COHÉRENCE du masque : lang_mask doit être le OU des bits des langues du jeu.
+        //    Un décalage ici allumerait le badge d'une langue que le jeu n'a pas.
+        const auto masks     = db.langMaskByGame();
+        int        compared = 0, divergent = 0;
+        for (const auto &game : db.searchByName(QStringLiteral("zelda"), 25)) {
+            quint64 rebuilt = 0;
+            for (const auto &language : db.languagesForGame(game.gameKey)) {
+                for (const auto &known : languages) {
+                    if (known.code == language.langCode)
+                        rebuilt |= known.bit();
+                }
+            }
+            if (rebuilt == 0)
+                continue;
+            ++compared;
+            if (masks.value(game.gameKey, 0) != rebuilt) {
+                ++divergent;
+                std::fprintf(stderr, "✗ %s : lang_mask %llu, reconstruit %llu\n",
+                             qPrintable(game.title),
+                             static_cast<unsigned long long>(masks.value(game.gameKey, 0)),
+                             static_cast<unsigned long long>(rebuilt));
+            }
+        }
+        std::printf("    masque reconstruit depuis exp_game_language : %d/%d cohérents\n",
+                    compared - divergent, compared);
+        if (divergent > 0)
+            return 1;
+    }
+
     if (checked > 0 && matched != checked)
         return 1;
     if (romsetsChecked > 0 && romsetsMatched != romsetsChecked)
@@ -336,6 +399,150 @@ int runScanCommand(const QString &romsDir, const QString &exportPath)
     return 0;
 }
 
+// Livrable du lot 8, vérifiable sans écran : le référentiel de langues, la couverture du
+// catalogue, et surtout les DEUX filtres du §8 côte à côte.
+//
+// Les afficher ensemble n'est pas une commodité de présentation : « existe » et « jouable »
+// sont deux questions différentes qu'il est facile de confondre, et le seul moyen de voir
+// qu'on ne les a pas interverties est de lire les deux nombres l'un sous l'autre.
+int runLanguagesCommand(const QString &exportPath, const QString &romsDir)
+{
+    igiris::catalog::ExportDatabase db;
+    QString                         error;
+    if (!db.open(exportPath, &error)) {
+        std::fprintf(stderr, "✗ %s\n", qPrintable(error)); // verbatim (§15)
+        return 1;
+    }
+
+    if (!db.hasLanguages()) {
+        std::fprintf(stderr,
+                     "✗ cet export (schéma %s) ne porte pas les tables de langues.\n"
+                     "  Le lot 8 exige un export 1.4.0 ou supérieur.\n",
+                     qPrintable(db.meta().schemaVersion));
+        return 1;
+    }
+
+    const auto languages = db.languages();
+    std::printf("%s · schéma %s\n%lld langues · %d liens ROM↔langue\n\n", qPrintable(exportPath),
+                qPrintable(db.meta().schemaVersion), static_cast<long long>(languages.size()),
+                db.meta().gameLanguages);
+
+    igiris::ui::GameListModel games;
+    games.setCatalogue(db.allGames(), db.platformKeysByGame(), db.arcadePlatformKeys());
+    games.setLanguages(languages, db.langMaskByGame());
+
+    const int badged = [&db] {
+        int count = 0;
+        for (const auto &mask : db.langMaskByGame())
+            count += mask != 0 ? 1 : 0;
+        return count;
+    }();
+    std::printf("couverture : %d des %d jeux portent au moins une langue (%.0f %%)\n\n", badged,
+                games.totalCount(), 100.0 * badged / qMax(1, games.totalCount()));
+
+    // Le scan est OPTIONNEL : sans lui la colonne « jouable » n'a rien à dire, et le dire
+    // vaut mieux que d'afficher des zéros qui passeraient pour un résultat.
+    bool scanned = false;
+    if (!romsDir.isEmpty()) {
+        QList<igiris::scan::ScanTarget> targets;
+        const QStringList               knownKeys = db.allPlatformKeys();
+        const QDir                      root(romsDir);
+        for (const QString &entry :
+             root.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
+            if (knownKeys.contains(entry))
+                targets.append({ entry, root.absoluteFilePath(entry) });
+        }
+
+        igiris::scan::RomScanner scanner(db, nullptr);
+        const auto               report = scanner.scan(targets);
+
+        QSet<QString> ownedRomKeys;
+        for (const auto &rom : report.identified) {
+            if (!rom.crc32.isEmpty())
+                ownedRomKeys.insert(igiris::catalog::romKey(rom.crc32, rom.platformKey));
+        }
+        games.setOwnedLanguageMasks(db.ownedLangMaskByGame(ownedRomKeys));
+        scanned = true;
+
+        std::printf("scan de %s : %d fichiers · %lld ROMs identifiées avec CRC\n\n",
+                    qPrintable(romsDir), report.filesSeen,
+                    static_cast<long long>(ownedRomKeys.size()));
+    }
+
+    std::printf("%-6s %-14s %4s %12s %12s\n", "code", "libellé", "bit", "existe", "jouable");
+    for (const auto &language : languages) {
+        games.setLanguageFilter({ language.code });
+
+        // Une langue sans bit ne peut pas être filtrée par masque. Le modèle le DIT au lieu
+        // de renvoyer discrètement le catalogue entier, qui se lirait comme un résultat.
+        if (!games.unfilterableLanguages().isEmpty()) {
+            std::printf("%-6s %s %4s %12s %12s\n", qPrintable(language.code),
+                        qPrintable(language.label.leftJustified(14)), "—", "hors masque",
+                        "hors masque");
+            continue;
+        }
+
+        games.setLanguageOwnedOnly(false);
+        const int exists = games.visibleCount();
+
+        int playable = -1;
+        if (scanned) {
+            games.setLanguageOwnedOnly(true);
+            playable = games.visibleCount();
+        }
+
+        std::printf("%-6s %s %4d %12d %12s\n", qPrintable(language.code),
+                    qPrintable(language.label.leftJustified(14)), language.bitIndex, exists,
+                    playable >= 0 ? qPrintable(QString::number(playable)) : "(pas de scan)");
+    }
+
+    // Contrôle de cohérence entre les deux filtres. « jouable » est par construction un
+    // sous-ensemble d'« existe » : un jeu jouable en français qui n'existerait pas en
+    // français signalerait deux référentiels de bits différents — l'erreur silencieuse
+    // que le §8 redoute.
+    if (scanned) {
+        for (const auto &language : languages) {
+            if (!language.hasBit())
+                continue;
+            games.setLanguageFilter({ language.code });
+            games.setLanguageOwnedOnly(false);
+            const int exists = games.visibleCount();
+            games.setLanguageOwnedOnly(true);
+            if (games.visibleCount() > exists) {
+                std::fprintf(stderr,
+                             "\n✗ « %s » : %d jouables pour %d existants. Les deux masques "
+                             "ne partagent pas le même référentiel de bits.\n",
+                             qPrintable(language.code), games.visibleCount(), exists);
+                return 1;
+            }
+        }
+        std::printf("\n✓ « jouable » est un sous-ensemble d'« existe » pour chaque langue\n");
+    }
+
+    // §17 : « la liste nue est le point de référence de performance ; on mesure ensuite le
+    // coût réel des badges par rapport à cette base. » Voici cette mesure.
+    //
+    // Elle balaie TOUT le catalogue, alors qu'un écran n'en montre qu'une quinzaine de
+    // lignes à la fois : le chiffre par ligne est donc le seul qui compte pour le
+    // défilement, et il est majoré par celui-ci.
+    games.setLanguageFilter({});
+    games.setLanguageOwnedOnly(false);
+
+    QElapsedTimer timer;
+    timer.start();
+    int badges = 0;
+    for (int row = 0; row < games.rowCount(); ++row)
+        badges += games.index(row, 0).data(igiris::ui::GameListModel::LanguagesRole).toList().size();
+    const qint64 elapsed = timer.elapsed();
+
+    std::printf("\ncoût des badges : %d badges construits sur %d lignes en %lld ms "
+                "(%.1f µs/ligne)\n",
+                badges, games.rowCount(), static_cast<long long>(elapsed),
+                games.rowCount() > 0 ? 1000.0 * elapsed / games.rowCount() : 0.0);
+
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char *argv[])
@@ -355,6 +562,15 @@ int main(int argc, char *argv[])
             const QString exp  = (i + 2 < argc) ? QString::fromLocal8Bit(argv[i + 2])
                                                 : QStringLiteral("data/games.db");
             return runScanCommand(roms, exp);
+        }
+        if (std::strcmp(argv[i], "--languages") == 0) {
+            // « --languages [export.db] [dossier-roms] » — le dossier active la colonne
+            // « jouable », qui n'existe pas sans scan.
+            const QString exp = (i + 1 < argc) ? QString::fromLocal8Bit(argv[i + 1])
+                                               : QStringLiteral("data/games.db");
+            const QString roms = (i + 2 < argc) ? QString::fromLocal8Bit(argv[i + 2])
+                                                : QString();
+            return runLanguagesCommand(exp, roms);
         }
         if (std::strcmp(argv[i], "--export") == 0) {
             const QString path = (i + 1 < argc)
@@ -448,6 +664,20 @@ int main(int argc, char *argv[])
         // qu'une combinaison de filtres reste interactive à la manette.
         games.setCatalogue(catalogue.allGames(), catalogue.platformKeysByGame(),
                            catalogue.arcadePlatformKeys());
+
+        // Lot 8 — les langues, si l'export les porte. Un export 1.3.0 reste parfaitement
+        // utilisable : l'interface signale l'absence au lieu d'afficher des lignes muettes.
+        if (catalogue.hasLanguages()) {
+            games.setLanguages(catalogue.languages(), catalogue.langMaskByGame());
+            detail.setLanguages(catalogue.languages());
+            std::printf("langues : %lld codes · %d liens ROM↔langue\n",
+                        static_cast<long long>(catalogue.languages().size()),
+                        catalogue.meta().gameLanguages);
+        } else {
+            std::printf("langues : absentes de cet export (%s) — badges et filtres de "
+                        "langue désactivés\n",
+                        qPrintable(catalogue.meta().schemaVersion));
+        }
         std::printf("catalogue : %d jeux · %lld plateformes · ouverture %lld ms · "
                     "chargement %lld ms\n",
                     games.totalCount(),
@@ -482,10 +712,26 @@ int main(int argc, char *argv[])
             // La fiche a besoin du CHEMIN de chaque ROM, pas seulement de la liste des
             // jeux possédés : c'est lui qui part dans la commande de lancement.
             QHash<QString, QString> ownedRoms;
-            for (const auto &rom : report.identified)
+            QSet<QString>           ownedRomKeys;
+            for (const auto &rom : report.identified) {
                 ownedRoms.insert(rom.gameKey + QLatin1Char('\x1f') + rom.platformKey,
                                  rom.path);
+                // L'arcade n'a pas de CRC (§4) : elle ne peut pas porter de langue, et
+                // c'est le catalogue qui le dit — pas une exception codée ici.
+                if (!rom.crc32.isEmpty())
+                    ownedRomKeys.insert(
+                        igiris::catalog::romKey(rom.crc32, rom.platformKey));
+            }
             detail.setOwnedRoms(ownedRoms);
+            detail.setOwnedRomKeys(ownedRomKeys);
+
+            // Le filtre DYNAMIQUE « jouable en <langue> » : export × ROMs possédées.
+            if (catalogue.hasLanguages()) {
+                const auto ownedLangs = catalogue.ownedLangMaskByGame(ownedRomKeys);
+                games.setOwnedLanguageMasks(ownedLangs);
+                std::printf("langues jouables : %lld jeux\n",
+                            static_cast<long long>(ownedLangs.size()));
+            }
 
             std::printf("scan local : %d fichiers · %lld jeux possédés\n", report.filesSeen,
                         static_cast<long long>(owned.size()));
@@ -513,6 +759,12 @@ int main(int argc, char *argv[])
             games.setOwnership(igiris::ui::GameListModel::OwnedOnly);
         else if (std::strcmp(argv[i], "--missing") == 0)
             games.setOwnership(igiris::ui::GameListModel::MissingOnly);
+        // Plusieurs codes séparés par des virgules : « fr,de » exige les DEUX (§8).
+        else if (std::strcmp(argv[i], "--lang") == 0 && i + 1 < argc)
+            games.setLanguageFilter(QString::fromLocal8Bit(argv[i + 1])
+                                        .split(QLatin1Char(','), Qt::SkipEmptyParts));
+        else if (std::strcmp(argv[i], "--lang-owned") == 0)
+            games.setLanguageOwnedOnly(true);
     }
     std::printf("filtres : %d / %d jeux affichés\n", games.visibleCount(),
                 games.totalCount());
@@ -591,6 +843,23 @@ int main(int argc, char *argv[])
                         index.data(igiris::ui::GameDetailModel::DefaultChoiceRole).toBool()
                             ? "  ← proposé par défaut"
                             : "");
+
+            // Les langues de CETTE plateforme (§7). Majuscule = illuminée (une ROM
+            // possédée la fournit), minuscule entre parenthèses = grisée.
+            const QVariantList languages =
+                index.data(igiris::ui::GameDetailModel::LanguagesRole).toList();
+            if (!languages.isEmpty()) {
+                QStringList badges;
+                for (const QVariant &entry : languages) {
+                    const QVariantMap badge = entry.toMap();
+                    const QString     code  = badge.value(QStringLiteral("code")).toString();
+                    badges.append(badge.value(QStringLiteral("owned")).toBool()
+                                      ? code.toUpper()
+                                      : QStringLiteral("(%1)").arg(code));
+                }
+                std::printf("      langues %s\n", qPrintable(badges.join(u' ')));
+            }
+
             if (status == igiris::ui::GameDetailModel::Green)
                 std::printf("      %s\n", qPrintable(detail.commandPreview(row)));
         }
