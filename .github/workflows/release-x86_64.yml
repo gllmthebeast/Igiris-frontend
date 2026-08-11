@@ -12,7 +12,7 @@
 # Un runner x86_64 réel supprime le problème à la racine, sans contorsionner le
 # CMakeLists.txt pour contenter un émulateur.
 
-name: Archive x86_64
+name: Artefacts x86_64
 
 on:
   # Toute release future : le tag suffit, l'archive s'attache toute seule.
@@ -67,13 +67,19 @@ jobs:
       - name: Tests
         run: ctest --test-dir build --output-on-failure
 
+      # dpkg-shlibdeps déduit les dépendances de bibliothèques depuis le binaire : c'est ce
+      # qui fait que le paquet réclame les bons noms « t64 » d'Ubuntu 24.04 sans qu'on ait
+      # à les écrire, donc sans qu'ils se périment.
       - name: Empaqueter
         id: package
         run: |
-          cd build && cpack -G ZIP
-          archive="$(ls igiris-frontend-*-x86_64.zip)"
-          echo "path=build/$archive" >> "$GITHUB_OUTPUT"
-          sha256sum "$archive"
+          cd build
+          cpack -G ZIP
+          # Le .deb n'existe qu'à partir de la 1.2.0 : sur un tag plus ancien, cpack -G DEB
+          # échouerait faute de configuration. On n'en fait donc pas une condition d'échec.
+          cpack -G DEB || echo "pas de configuration DEB sur ce tag — archive seule"
+          ls -1 igiris-frontend*.zip igiris-frontend*.deb 2>/dev/null
+          sha256sum igiris-frontend*.zip igiris-frontend*.deb 2>/dev/null
 
       # --clobber rend le workflow rejouable : une seconde exécution remplace l'asset au
       # lieu d'échouer sur un nom déjà pris.
@@ -81,5 +87,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "${{ steps.tag.outputs.ref }}" \
-            "${{ steps.package.outputs.path }}" --clobber
+          cd build
+          assets=""
+          for f in igiris-frontend-*-x86_64.zip igiris-frontend_*_amd64.deb; do
+            [ -f "$f" ] && assets="$assets $f"
+          done
+          if [ -z "$assets" ]; then
+            echo "::error::aucun artefact produit"
+            exit 1
+          fi
+          # shellcheck disable=SC2086
+          gh release upload "${{ steps.tag.outputs.ref }}" $assets --clobber

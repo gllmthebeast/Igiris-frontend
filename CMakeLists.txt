@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 
 # SemVer strict (CLAUDE.md §15) : cette version est la seule source de vérité.
 # Elle alimente version.h, et c'est elle qu'affiche `igiris-frontend --version`.
-project(igiris-frontend VERSION 1.1.0 LANGUAGES CXX)
+project(igiris-frontend VERSION 1.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -104,10 +104,65 @@ set(CPACK_PACKAGE_FILE_NAME
     "igiris-frontend-${PROJECT_VERSION}-${CMAKE_SYSTEM_PROCESSOR}")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
     "Frontend de jeux unifie pour distributions de retrogaming")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/gllmthebeast/Igiris-frontend")
 set(CPACK_GENERATOR "ZIP;TGZ")
 set(CPACK_SOURCE_GENERATOR "")
 # L'export est un ARTEFACT : jamais dans la livraison (§15).
 set(CPACK_PACKAGE_IGNORE_FILES "/build/;/data/;/.git/")
+
+# ---------------------------------------------------------------------------------------
+# Paquet Debian — pour les hôtes qui ont un gestionnaire de paquets
+# ---------------------------------------------------------------------------------------
+#
+# Il ne remplace PAS l'archive : les distributions de rétrogaming cibles sont des Buildroot
+# en lecture seule, sans dpkg. Le .deb sert aux hôtes classiques (Ubuntu de test, Retrobat
+# sous WSL), où il apporte une chose que l'archive ne peut pas donner : la RÉSOLUTION
+# AUTOMATIQUE des dépendances.
+#
+# Ce n'est pas un confort. Les modules QML sont chargés dynamiquement PAR CHEMIN, donc leur
+# absence ne se voit ni à l'édition de liens ni au démarrage : elle se manifeste par une
+# fenêtre qui ne s'ouvre jamais et un « module ... is not installed » sur la sortie
+# d'erreur. C'est exactement ce qui est arrivé en rédigeant le tutoriel d'installation,
+# faute d'avoir listé qml6-module-qtqml-workerscript. Déclaré ici, l'oubli devient
+# impossible.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_program(IGIRIS_DPKG_SHLIBDEPS dpkg-shlibdeps)
+    if(IGIRIS_DPKG_SHLIBDEPS)
+        list(APPEND CPACK_GENERATOR "DEB")
+    else()
+        message(STATUS "dpkg-shlibdeps absent : paquet .deb non généré (archives seules)")
+    endif()
+endif()
+
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "gllmthebeast <noreply@igiris.xyz>")
+set(CPACK_DEBIAN_PACKAGE_SECTION "games")
+# igiris-frontend_1.1.0_arm64.deb — la convention Debian, pas la nôtre.
+set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+
+# Les bibliothèques partagées sont déduites du binaire lui-même : c'est plus sûr qu'une
+# liste écrite à la main, qui manquerait les renommages (Ubuntu 24.04 a suffixé quantité de
+# paquets en « t64 » lors du passage à time_t 64 bits).
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+
+# En revanche les modules QML et le plugin de plateforme sont invisibles à l'éditeur de
+# liens : ils se chargent au démarrage, par chemin. Eux doivent être déclarés à la main.
+set(CPACK_DEBIAN_PACKAGE_DEPENDS
+    "qml6-module-qtquick, qml6-module-qtquick-window, qml6-module-qtqml, qml6-module-qtqml-workerscript, qt6-qpa-plugins")
+
+# python3 sert à probe.py, curl à fetch-export.sh : utiles, pas indispensables au binaire.
+set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "python3, curl")
+
+# Format Debian : la SYNOPSIS vient de CPACK_PACKAGE_DESCRIPTION_SUMMARY et CPack la place
+# lui-même en première ligne. Ne mettre ici que le corps, chaque ligne préfixée d'une
+# espace — sans quoi dpkg lit la ligne comme un nouveau champ de contrôle.
+set(CPACK_DEBIAN_PACKAGE_DESCRIPTION
+    " Presente une liste unique de jeux tous systemes confondus, indique lesquels
+ sont possedes localement et sur quelle plateforme, et lance le jeu via la
+ distribution hote sans jamais modifier son moteur d'emulation.
+ .
+ Le catalogue n'est PAS inclus : c'est un artefact telecharge separement par
+ /usr/share/igiris-frontend/tools/fetch-export.sh")
+
 include(CPack)
 
 # ---------------------------------------------------------------------------------------
