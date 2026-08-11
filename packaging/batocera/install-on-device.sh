@@ -12,7 +12,6 @@ set -eu
 
 BIN_SRC="${1:-/userdata/system/igiris-frontend}"
 BIN_DST="/userdata/system/igiris/igiris-frontend"
-AUTOSTART="/usr/share/labwc/autostart"
 BACKUP="/userdata/system/igiris/autostart.original"
 
 if [ ! -f "$BIN_SRC" ]; then
@@ -21,11 +20,42 @@ if [ ! -f "$BIN_SRC" ]; then
     exit 1
 fi
 
-if [ ! -f "$AUTOSTART" ]; then
-    echo "✗ $AUTOSTART absent : cette version ne démarre pas via labwc." >&2
+# LA CHAÎNE DE DÉMARRAGE DÉPEND DE L'ARCHITECTURE, PAS DE LA VERSION.
+#
+# Constaté en montant les deux images 43.1 — même version, même date de build :
+#
+#   ARM (bcm2712)  Wayland : labwc, lancé par S31emulationstation, qui lit
+#                  /usr/share/labwc/autostart dont la dernière ligne lance ES.
+#   x86_64         X11 : S31emulationstation appelle startx, donc
+#                  /etc/X11/xinit/xinitrc, dont la dernière ligne est
+#                  « openbox --startup "emulationstation-standalone" ».
+#
+# Les plugins Qt le confirment : l'image ARM embarque libqwayland.so, celle x86_64 non —
+# elle a xcb. Supposer une seule chaîne aurait produit un appareil qui redémarre sur
+# EmulationStation sans rien dire.
+if [ -f "/usr/share/labwc/autostart" ]; then
+    AUTOSTART="/usr/share/labwc/autostart"
+    # Toute la ligne est remplacée : c'est elle qui lance ES.
+    PATTERN="^/usr/bin/emulationstation-standalone.*"
+    REPLACEMENT="$BIN_DST > /userdata/system/logs/igiris.log 2>\&1"
+    CHAIN="labwc (Wayland)"
+elif [ -f "/etc/X11/xinit/xinitrc" ] \
+     && grep -q 'startup "emulationstation-standalone"' /etc/X11/xinit/xinitrc; then
+    AUTOSTART="/etc/X11/xinit/xinitrc"
+    # Ici seul l'ARGUMENT de --startup change : openbox doit rester, sans quoi il n'y a
+    # plus de gestionnaire de fenêtres et Qt n'a plus de surface où s'afficher.
+    PATTERN='startup "emulationstation-standalone"'
+    REPLACEMENT="startup \"$BIN_DST > /userdata/system/logs/igiris.log 2>\&1\""
+    CHAIN="openbox (X11)"
+else
+    echo "✗ aucune chaîne de démarrage reconnue :" >&2
+    echo "    ni /usr/share/labwc/autostart (Wayland)," >&2
+    echo "    ni la ligne openbox de /etc/X11/xinit/xinitrc (X11)." >&2
     echo "  Ne rien modifier au hasard — vérifier la chaîne de démarrage d'abord." >&2
     exit 1
 fi
+
+echo "▶ chaîne détectée : $CHAIN — $AUTOSTART"
 
 mkdir -p /userdata/system/igiris /userdata/system/logs
 cp -f "$BIN_SRC" "$BIN_DST"
@@ -41,16 +71,34 @@ fi
 # La partition système est en lecture seule : la remonter le temps de l'écriture.
 mount -o remount,rw / 2>/dev/null || true
 
-# Remplacer UNE ligne, celle qui lance EmulationStation.
-sed -i "s|^/usr/bin/emulationstation-standalone.*|$BIN_DST > /userdata/system/logs/igiris.log 2>\&1|" \
-    "$AUTOSTART"
-
-mount -o remount,ro / 2>/dev/null || true
+# Remplacer UNE chose, celle qui lance EmulationStation — la ligne entière sous Wayland,
+# le seul argument de --startup sous X11.
+sed -i "s|$PATTERN|$REPLACEMENT|" "$AUTOSTART"
 
 if grep -q "igiris-frontend" "$AUTOSTART"; then
-    echo "✓ autostart modifié — redémarrer pour lancer igiris-frontend"
-    echo "  retour en arrière : cp $BACKUP $AUTOSTART"
+    # SANS CECI, TOUT CE QUI PRÉCÈDE EST PERDU AU REDÉMARRAGE.
+    #
+    # La racine de Batocera est un squashfs en lecture seule recouvert d'un overlay EN RAM :
+    # « remount,rw / » rend l'écriture possible, mais elle ne survit pas à l'extinction.
+    # batocera-save-overlay persiste cet overlay dans /boot/boot/overlay — son propre
+    # en-tête le dit : « if you modify the root using mount -o remount,rw / then, you need
+    # to save it using this script ».
+    #
+    # L'appareil serait sinon redémarré droit sur EmulationStation, sans le moindre message
+    # d'erreur, et la cause aurait été introuvable.
+    if command -v batocera-save-overlay >/dev/null 2>&1; then
+        echo "▶ persistance de la modification (batocera-save-overlay)…"
+        batocera-save-overlay
+        echo "✓ autostart modifié ET persisté — redémarrer pour lancer igiris-frontend"
+    else
+        mount -o remount,ro / 2>/dev/null || true
+        echo "⚠ batocera-save-overlay introuvable : la modification n'est PAS persistée."
+        echo "  Elle sera perdue au redémarrage. Vérifier la distribution avant d'aller"
+        echo "  plus loin — le mécanisme de persistance diffère d'une image à l'autre."
+    fi
+    echo "  retour en arrière : cp $BACKUP $AUTOSTART puis batocera-save-overlay"
 else
+    mount -o remount,ro / 2>/dev/null || true
     echo "✗ la ligne d'EmulationStation n'a pas été trouvée dans $AUTOSTART" >&2
     echo "  rien n'a été remplacé ; l'appareil démarre toujours sur EmulationStation." >&2
     exit 1
