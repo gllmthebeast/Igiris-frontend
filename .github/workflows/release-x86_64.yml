@@ -1,0 +1,85 @@
+# Construit l'archive x86_64 et l'attache à une release.
+#
+# POURQUOI CE WORKFLOW EXISTE
+#
+# Le développement se fait sur une VM aarch64, qui produit donc l'archive aarch64
+# nativement. Le x86_64 — nécessaire à Retrobat et aux PC de test (CLAUDE.md §1) — ne peut
+# pas y être construit : `cmake -E cmake_autogen` segfault sous émulation QEMU, de façon
+# reproductible et indépendamment de la version de cmake (3.25 et 3.28 échouent
+# identiquement), du parallélisme d'autogen et du jeu d'instructions émulé. `moc` lui-même
+# fonctionne : c'est l'orchestrateur de CMake qui casse, pas la chaîne Qt.
+#
+# Un runner x86_64 réel supprime le problème à la racine, sans contorsionner le
+# CMakeLists.txt pour contenter un émulateur.
+
+name: Archive x86_64
+
+on:
+  # Toute release future : le tag suffit, l'archive s'attache toute seule.
+  push:
+    tags:
+      - 'v*'
+  # Et de quoi rattraper un tag déjà publié — c'est ce qui a servi pour v1.0.0 et v1.1.0.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag à construire et à compléter (ex. v1.1.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write # nécessaire pour téléverser un asset de release
+
+jobs:
+  build:
+    # Version épinglée, et pas ubuntu-latest : la version de Qt du runner détermine celle
+    # du binaire livré. Un glissement silencieux d'image changerait l'artefact sans qu'on
+    # l'ait décidé.
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Déterminer le tag
+        id: tag
+        run: echo "ref=${{ inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.ref }}
+
+      - name: Dépendances
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build \
+            qt6-base-dev qt6-declarative-dev libqt6opengl6-dev \
+            libsqlite3-dev zlib1g-dev
+
+      - name: Configurer et construire
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+
+      - name: Vérifier le binaire
+        run: ./build/igiris-frontend --version
+
+      # Les suites doivent passer sur l'architecture livrée, pas seulement sur celle de
+      # développement : c'est tout l'intérêt de construire ici plutôt que de croiser.
+      - name: Tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Empaqueter
+        id: package
+        run: |
+          cd build && cpack -G ZIP
+          archive="$(ls igiris-frontend-*-x86_64.zip)"
+          echo "path=build/$archive" >> "$GITHUB_OUTPUT"
+          sha256sum "$archive"
+
+      # --clobber rend le workflow rejouable : une seconde exécution remplace l'asset au
+      # lieu d'échouer sur un nom déjà pris.
+      - name: Attacher à la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ steps.tag.outputs.ref }}" \
+            "${{ steps.package.outputs.path }}" --clobber
