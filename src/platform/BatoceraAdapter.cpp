@@ -150,6 +150,21 @@ QStringList BatoceraAdapter::romDirectories() const
     return { roms };
 }
 
+QStringList BatoceraAdapter::exportSearchPaths() const
+{
+    // /userdata est la SEULE partition inscriptible : le reste du système est en lecture
+    // seule et serait écrasé à la mise à jour. C'est donc là que l'installateur dépose
+    // l'export, et là qu'il faut le chercher.
+    //
+    // Les chemins sont renvoyés qu'ils existent ou non : c'est l'appelant qui teste. Une
+    // liste vide se lirait « cette distribution ne sait pas où est l'export », ce qui est
+    // faux — elle le sait, le fichier n'a simplement pas encore été téléchargé.
+    return {
+        absolutePath(QStringLiteral("userdata/system/igiris/games.db")),
+        absolutePath(QStringLiteral("userdata/igiris/games.db")),
+    };
+}
+
 LaunchCommand BatoceraAdapter::buildLaunchCommand(const SystemEntry   &system,
                                                   const QString       &romPath,
                                                   const LaunchDetails &details) const

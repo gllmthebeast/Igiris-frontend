@@ -31,6 +31,7 @@ public:
                                const QStringList &localSystems) const override;
 
     QStringList romDirectories() const override;
+    QStringList exportSearchPaths() const override;
 
     LaunchCommand buildLaunchCommand(const SystemEntry &system, const QString &romPath,
                                      const LaunchDetails &details) const override;

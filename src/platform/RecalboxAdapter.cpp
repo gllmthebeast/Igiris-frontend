@@ -209,6 +209,17 @@ QStringList RecalboxAdapter::romDirectories() const
     return { roms };
 }
 
+QStringList RecalboxAdapter::exportSearchPaths() const
+{
+    // Même raisonnement que chez Batocera, autre partition : c'est /recalbox/share qui est
+    // inscriptible ici. La différence de chemin est précisément ce que cette méthode existe
+    // pour absorber.
+    return {
+        absolutePath(QStringLiteral("recalbox/share/system/igiris/games.db")),
+        absolutePath(QStringLiteral("recalbox/share/igiris/games.db")),
+    };
+}
+
 LaunchCommand RecalboxAdapter::buildLaunchCommand(const SystemEntry   &system,
                                                   const QString       &romPath,
                                                   const LaunchDetails &details) const

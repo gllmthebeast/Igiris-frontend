@@ -3,12 +3,19 @@
 // L'adaptateur de plateforme — CLAUDE.md §1.
 //
 // Tout ce qui est spécifique à une distribution est isolé derrière cette interface, qui
-// expose EXACTEMENT QUATRE choses :
+// expose EXACTEMENT CINQ choses :
 //
 //   1. FOURNIR les systèmes déclarés (les localiser ET lire leur format)
 //   2. résoudre une platform_key du catalogue vers le nom de système local
 //   3. localiser les dossiers de ROMs
 //   4. lancer — construire et exécuter la commande, substitution de %ROM%
+//   5. localiser l'export sur cet appareil
+//
+// ⚠️ La cinquième est arrivée APRÈS coup, et l'oubli avait un coût visible : sur Batocera
+// l'application affichait « 0 jeux ». L'installateur dépose l'export dans /userdata, la
+// seule partition inscriptible, tandis que main.cpp cherchait des chemins Unix génériques
+// (data/, ~/.local/share, /var/lib) dont AUCUN n'existe là-bas. Le point d'entrée devinait
+// donc un emplacement qui, lui aussi, dépend de la distribution.
 //
 // Plus la déclaration de capacités : une distribution qui ne sait pas faire quelque chose
 // le dit, et l'interface s'adapte au lieu de planter.
@@ -146,6 +153,18 @@ public:
     // (4b) Exécuter. `error` reçoit le message COMPLET en cas d'échec (§15).
     virtual bool launch(const SystemEntry &system, const QString &romPath,
                         const LaunchDetails &details, QString *error) const = 0;
+
+    // (5) Où l'export peut se trouver sur CETTE distribution, par ordre de préférence.
+    //
+    //     Chemins COMPLETS du fichier, pas des répertoires : c'est ce que le point d'entrée
+    //     teste, et lui laisser recomposer un nom de fichier ferait ressortir une
+    //     convention hors de l'adaptateur.
+    //
+    //     L'emplacement dépend de la distribution parce que la partition INSCRIPTIBLE en
+    //     dépend : /userdata chez Batocera, /recalbox/share ailleurs. Ces chemins passent
+    //     avant les emplacements génériques, sans les remplacer — un binaire lancé depuis
+    //     un dépôt doit continuer à trouver son data/games.db.
+    virtual QStringList exportSearchPaths() const = 0;
 };
 
 } // namespace igiris::platform

@@ -547,6 +547,15 @@ int runLanguagesCommand(const QString &exportPath, const QString &romsDir)
 
 int main(int argc, char *argv[])
 {
+    // Sortie LIGNE PAR LIGNE, y compris quand elle est redirigée.
+    //
+    // Sur un appareil, l'autostart redirige tout vers un fichier de log. La sortie standard
+    // devient alors bufferisée par BLOC : rien n'atteint le fichier avant 4 Ko accumulés ou
+    // la fin du processus. Or ce processus ne se termine jamais — il tient l'interface.
+    // Le log restait donc vide, ce qui se lit « rien ne s'est lancé » alors que tout allait
+    // bien, et masquait au passage les diagnostics de chargement du catalogue.
+    std::setvbuf(stdout, nullptr, _IOLBF, 0);
+
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--version") == 0 || std::strcmp(argv[i], "-v") == 0) {
             printVersion();
@@ -644,19 +653,35 @@ int main(int argc, char *argv[])
         if (std::strcmp(argv[i], "--export-db") == 0 && i + 1 < argc)
             exportPath = QString::fromLocal8Bit(argv[i + 1]);
     }
+    // L'ADAPTATEUR D'ABORD. Sur un appareil, l'export est là où la distribution autorise
+    // l'écriture, et ce chemin lui est propre. Chercher d'abord les emplacements Unix
+    // génériques revenait à afficher « 0 jeux » alors que l'export était bel et bien là,
+    // à l'emplacement que l'installateur de la distribution avait choisi.
+    QStringList candidates;
+    if (adapter)
+        candidates = adapter->exportSearchPaths();
+
+    // Puis les emplacements génériques, qui restent valables : un binaire lancé depuis le
+    // dépôt doit continuer à trouver son data/games.db, sur une machine de développement où
+    // aucune distribution n'est détectée.
+    candidates << QStringLiteral("data/games.db")
+               << QDir::homePath() + QStringLiteral("/.local/share/igiris/games.db")
+               << QStringLiteral("/var/lib/igiris/games.db");
+
     if (exportPath.isEmpty()) {
-        for (const QString &candidate :
-             { QStringLiteral("data/games.db"),
-               QDir::homePath() + QStringLiteral("/.local/share/igiris/games.db"),
-               QStringLiteral("/var/lib/igiris/games.db") }) {
+        for (const QString &candidate : std::as_const(candidates)) {
             if (QFileInfo::exists(candidate)) {
                 exportPath = candidate;
                 break;
             }
         }
     }
-    if (exportPath.isEmpty())
-        exportPath = QStringLiteral("data/games.db"); // pour que le message cite un chemin
+    if (exportPath.isEmpty()) {
+        // Aucun candidat n'existe. Citer le PREMIER — celui de la distribution quand elle
+        // est reconnue — plutôt qu'un chemin de développement : c'est là que l'utilisateur
+        // doit déposer le fichier, et le message doit le lui dire.
+        exportPath = candidates.first();
+    }
 
     if (catalogue.open(exportPath, &catalogueError)) {
         const qint64 opened = timer.elapsed();
@@ -739,6 +764,13 @@ int main(int argc, char *argv[])
     } else {
         std::fprintf(stderr, "⚠ %s — interface chargée sans catalogue\n",
                      qPrintable(catalogueError));
+        // Lister CE QUI A ÉTÉ CHERCHÉ. « 0 jeux » sans cette liste n'apprend rien : le
+        // fichier peut être présent, simplement ailleurs que là où on l'attendait.
+        std::fprintf(stderr, "  emplacements essayés :\n");
+        for (const QString &candidate : std::as_const(candidates))
+            std::fprintf(stderr, "    %s\n", qPrintable(candidate));
+        std::fprintf(stderr, "  télécharger l'export : fetch-export.sh <dossier>\n"
+                             "  ou forcer le chemin  : igiris-frontend --export-db <fichier>\n");
     }
     if (!initialFilter.isEmpty())
         games.setFilter(initialFilter);
