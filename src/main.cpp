@@ -710,13 +710,31 @@ int main(int argc, char *argv[])
                     static_cast<long long>(opened),
                     static_cast<long long>(timer.elapsed() - opened));
 
-        // Filtre DYNAMIQUE : il n'existe qu'après un scan local. Sans --roms, l'interface
-        // le signale au lieu de proposer un filtre qui ne filtrerait rien.
+        // Filtre DYNAMIQUE, et surtout STATUT VERT : les deux dépendent du scan local.
+        //
+        // ⚠️ Le scan ne partait qu'avec « --roms », donc JAMAIS au démarrage de l'appareil,
+        // où l'autostart lance le binaire sans argument. Aucune ROM ne pouvait passer au
+        // vert, et le lancement était inaccessible — alors que l'adaptateur SAIT où sont
+        // les ROMs. Sa méthode romDirectories() n'était appelée nulle part : une capacité
+        // déclarée que personne ne consommait.
+        QStringList romsDirs;
         for (int i = 1; i < argc; ++i) {
-            if (std::strcmp(argv[i], "--roms") != 0 || i + 1 >= argc)
-                continue;
-            const QString romsDir = QString::fromLocal8Bit(argv[i + 1]);
+            if (std::strcmp(argv[i], "--roms") == 0 && i + 1 < argc)
+                romsDirs << QString::fromLocal8Bit(argv[i + 1]);
+        }
 
+        // À défaut d'argument, c'est l'adaptateur qui tranche — comme pour l'export (§1).
+        // La capacité est vérifiée : une distribution qui ne sait pas localiser ses ROMs
+        // le DIT, et on ne lui invente pas un chemin.
+        if (romsDirs.isEmpty() && adapter
+            && adapter->supports(igiris::platform::Capability::RomDirectories)) {
+            romsDirs = adapter->romDirectories();
+            if (!romsDirs.isEmpty())
+                std::printf("dossiers de ROMs (adaptateur) : %s\n",
+                            qPrintable(romsDirs.join(u", ")));
+        }
+
+        for (const QString &romsDir : std::as_const(romsDirs)) {
             QList<igiris::scan::ScanTarget> targets;
             const QStringList knownKeys = catalogue.allPlatformKeys();
             const QDir        root(romsDir);
