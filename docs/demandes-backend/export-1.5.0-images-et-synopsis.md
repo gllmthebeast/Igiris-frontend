@@ -1,4 +1,4 @@
-# Demande au backend `igiris` — export **1.5.0** : synopsis, joueurs, années par plateforme, images
+# Demande au backend `igiris` — export **1.5.0** : visuels, synopsis et métadonnées
 
 > Émise par **igiris-frontend** le 2026-08-14, depuis la version 1.3.0.
 > Ajout **strictement additif** → version **mineure**. Un frontend 1.3.0 continue de lire
@@ -69,7 +69,50 @@ ne peut associer à aucune sa propre date.
 IGDB expose des `release_dates` par plateforme : la donnée existe en amont. `NULL` quand
 elle est inconnue — le frontend n'affichera alors rien, ce qui est correct.
 
-### 2.4 Un pack d'images hors ligne
+### 2.4 Une image de **bandeau**, distincte de la jaquette
+
+C'est la demande la plus visible aujourd'hui, et la seule qu'aucun contournement ne sauve.
+
+```sql
+ALTER TABLE exp_game ADD COLUMN artwork_ref TEXT;
+```
+
+La fiche de jeu a désormais un **bandeau** en haut. Il ne peut afficher que `cover_ref`,
+faute d'autre image — c'est-à-dire une **jaquette recadrée en large**. Le résultat est
+médiocre par nature :
+
+- une jaquette est **verticale** ; l'étirer en bandeau en montre une bande centrale
+  arbitraire ;
+- elle porte du **texte** — logo, mentions légales, code-barres — qui se retrouve tronqué
+  en travers du bandeau ;
+- c'est la **même image** que la vignette affichée juste à côté, ce qui appauvrit la fiche
+  au lieu de l'enrichir.
+
+Le frontend affiche donc ce bandeau **volontairement discret** (opacité 0,22) tant qu'il
+sait qu'il ne s'agit pas d'une vraie illustration. La propriété `hasRealBanner` existe déjà
+côté frontend : livrer `artwork_ref` suffit à basculer le rendu, sans rien redessiner.
+
+IGDB expose des **`artworks`** — des illustrations horizontales, prévues exactement pour cet
+usage — et des **`screenshots`**. Les deux conviennent ; les `artworks` sont préférables
+parce qu'ils sont composés, là où une capture est prise au hasard d'une partie.
+
+### 2.5 Des captures **par système** — la question ouverte
+
+Demandé par l'usage : voir à quoi ressemble le jeu **sur la machine qu'on va lancer**. Une
+version NES et une version Amiga du même titre n'ont rien à voir à l'écran, et c'est
+précisément le choix que la fiche propose.
+
+⚠️ **Le frontend ignore si c'est réalisable, et ne prétend pas trancher.** Autant qu'on
+sache, IGDB indexe ses médias **par jeu**, pas par plateforme : il n'y aurait donc rien à
+extraire de la source actuelle. Les bases spécialisées du rétrogaming — ScreenScraper et
+consorts — fournissent bien du média par système, mais changer ou ajouter une source est
+une décision de fond côté backend, avec ses propres questions de licence et de volume.
+
+La demande est donc posée comme **une question, pas une exigence** : est-ce atteignable
+depuis les sources actuelles ? Si non, un `artwork_ref` unique par jeu (§2.4) couvre déjà
+l'essentiel du besoin, et c'est lui qu'il faut livrer en premier.
+
+### 2.6 Un pack d'images hors ligne
 
 Le §11 le signale depuis le début comme « à demander ». Volume mesuré sur les vraies
 images IGDB, pas estimé :
@@ -96,7 +139,7 @@ a besoin qu'il soit documenté :
 - **Cadence de rafraîchissement.** Mensuelle, comme l'export ? Ou seulement quand des
   jaquettes changent ?
 
-### 2.5 ⚠️ Droits de redistribution — le vrai point bloquant
+### 2.7 ⚠️ Droits de redistribution — le vrai point bloquant
 
 C'est la question à régler **avant** toute décision technique.
 

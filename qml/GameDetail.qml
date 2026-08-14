@@ -25,53 +25,64 @@ FocusScope {
         color: sheet.background
     }
 
-    // Fond : la jaquette du jeu, agrandie et très assombrie.
-    //
-    // PAS de flou. Qt 6.5 apporte MultiEffect, mais ce binaire est compilé contre Qt 6.4
-    // pour rester installable sur les hôtes courants (§12) : y recourir échangerait un
-    // effet décoratif contre une contrainte de version. Une opacité basse sous un voile
-    // sombre donne le même résultat perçu, sur n'importe quelle version.
-    //
-    // Le texte passe AVANT tout le reste : un fond qui rend un titre moins lisible sur un
-    // téléviseur, à trois mètres, est un fond raté (§6).
-    Image {
-        id: backdrop
-        anchors.fill: parent
-        source: games.coversEnabled ? detail.coverRef : ""
-        // Recadrage plein cadre : une jaquette est verticale, la fiche horizontale.
-        fillMode: Image.PreserveAspectCrop
-        asynchronous: true
-        cache: true
-        // Décodage borné : c'est la MÊME image que la vignette, mais affichée en grand.
-        // Sans borne, Qt en garderait deux décodages distincts en mémoire.
-        sourceSize.width: 640
-        opacity: status === Image.Ready ? 0.13 : 0
-        visible: opacity > 0
-        Behavior on opacity { NumberAnimation { duration: 180 } }
-    }
-
-    // Voile : garantit le contraste du texte quelle que soit la jaquette — une pochette
-    // claire ne doit pas rendre le titre illisible.
-    Rectangle {
-        anchors.fill: parent
-        visible: backdrop.visible
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: Qt.rgba(0.06, 0.06, 0.08, 0.55) }
-            GradientStop { position: 1.0; color: Qt.rgba(0.06, 0.06, 0.08, 0.92) }
-        }
-    }
-
     // Le code couleur du §7 est DESSINÉ, pas écrit en emoji : la police du système cible
     // n'en a pas forcément, et un carré vide ne veut rien dire. C'est aussi moins coûteux
     // au défilement.
     readonly property var statusColors: ["#3a3a44", "#b03b3b", "#3f9d4f"] // noir, rouge, vert
 
+    // ------------------------------------------------------------------ bandeau
+    //
+    // Un BANDEAU, pas un fond de page : une bande en haut de la fiche, qui se fond dans
+    // l'arrière-plan et sous laquelle la liste des systèmes reste sur un fond neutre. Un
+    // visuel qui court derrière du texte dense le rend illisible à trois mètres (§6).
+    //
+    // ⚠️ L'image affichée est aujourd'hui la JAQUETTE recadrée, faute de mieux : l'export
+    // 1.4.0 ne fournit aucune autre image. Une jaquette est verticale et porte du texte —
+    // l'étirer en bandeau donne un résultat médiocre, et c'est pourquoi le rendu est
+    // volontairement discret tant que `detail.hasRealBanner` est faux. Le jour où le
+    // backend livre une illustration dédiée (demande export-1.5.0), il n'y a rien à
+    // redessiner : seule l'opacité change.
+    Item {
+        id: banner
+
+        anchors { top: parent.top; left: parent.left; right: parent.right }
+        height: 208
+        clip: true
+
+        Image {
+            id: bannerImage
+            anchors.fill: parent
+            source: games.coversEnabled ? detail.bannerRef : ""
+            fillMode: Image.PreserveAspectCrop
+            asynchronous: true
+            cache: true
+            // Décodage borné : sans cela, Qt garderait un second décodage pleine taille de
+            // la même image déjà affichée en vignette.
+            sourceSize.width: 720
+            // Discret tant que ce n'est qu'une jaquette étirée ; franc quand ce sera une
+            // vraie illustration.
+            opacity: status === Image.Ready ? (detail.hasRealBanner ? 0.55 : 0.22) : 0
+            Behavior on opacity { NumberAnimation { duration: 200 } }
+        }
+
+        // Fondu vers le fond de la fiche : le bandeau ne doit pas se terminer par une
+        // arête nette, et le texte posé dessus doit garder son contraste.
+        Rectangle {
+            anchors.fill: parent
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: Qt.rgba(0.06, 0.06, 0.08, 0.60) }
+                GradientStop { position: 0.55; color: Qt.rgba(0.06, 0.06, 0.08, 0.80) }
+                GradientStop { position: 1.0; color: sheet.background }
+            }
+        }
+    }
+
     // §7 : « Jaquette, métadonnées, et la liste des systèmes ».
     GameCover {
         id: coverArt
-        anchors { top: parent.top; topMargin: 28; left: parent.left; leftMargin: 32 }
-        width: 72
-        height: 96
+        anchors { top: parent.top; topMargin: 34; left: parent.left; leftMargin: 32 }
+        width: 105
+        height: 140
         source: detail.coverRef
         enabled: games.coversEnabled
         dimColor: sheet.dimColor
@@ -79,18 +90,18 @@ FocusScope {
 
     Text {
         id: title
-        anchors { top: parent.top; topMargin: 28; left: coverArt.right; leftMargin: 20
+        anchors { top: parent.top; topMargin: 40; left: coverArt.right; leftMargin: 24
                   right: parent.right; rightMargin: 32 }
         text: detail.title
         color: sheet.textColor
-        font.pixelSize: 30
+        font.pixelSize: 32
         elide: Text.ElideRight
     }
 
     // Métadonnées du §7. Elles existaient dans l'export sans être affichées nulle part.
     Row {
         id: meta
-        anchors { top: title.bottom; topMargin: 8; left: coverArt.right; leftMargin: 20 }
+        anchors { top: title.bottom; topMargin: 10; left: coverArt.right; leftMargin: 24 }
         spacing: 18
 
         Text {
@@ -108,25 +119,30 @@ FocusScope {
             color: sheet.dimColor
             font.pixelSize: 17
         }
+
+        // Ce que l'export ne porte pas, et qui manque visiblement ici : synopsis, nombre
+        // de joueurs, année par plateforme. Demandé au backend (export 1.5.0) plutôt que
+        // deviné sur l'appareil (§0).
     }
 
     Text {
         id: warning
-        anchors { top: meta.bottom; topMargin: 8; left: coverArt.right; leftMargin: 20
+        anchors { top: meta.bottom; topMargin: 10; left: coverArt.right; leftMargin: 24
                   right: parent.right; rightMargin: 32 }
         visible: text.length > 0
         // Une capacité non déclarée se DIT, elle ne se devine pas (§1).
         text: detail.launchWarning
         color: "#d8a657"
-        font.pixelSize: 17
+        font.pixelSize: 16
         wrapMode: Text.WordWrap
     }
 
     ListView {
         id: platforms
 
-        anchors { top: coverArt.bottom; topMargin: 20
-                  left: parent.left; right: parent.right; bottom: legend.top
+        anchors { top: banner.bottom; topMargin: 14
+                  left: parent.left; right: parent.right
+                  bottom: colourKey.visible ? colourKey.top : legend.top
                   bottomMargin: 12 }
 
         model: detail
@@ -261,6 +277,7 @@ FocusScope {
 
     // Légende dessinée avec les mêmes pastilles que les lignes.
     Row {
+        id: colourKey
         anchors { left: parent.left; leftMargin: 32; bottom: legend.top; bottomMargin: 10 }
         spacing: 22
         visible: sheet.lastMessage.length === 0

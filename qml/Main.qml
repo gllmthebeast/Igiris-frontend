@@ -78,13 +78,28 @@ Window {
             }
         }
 
-        Text {
+        Row {
             anchors { right: parent.right; rightMargin: 24; verticalCenter: parent.verticalCenter }
-            color: theme.dim
-            font.pixelSize: 20
-            text: games.visibleCount === games.totalCount
-                  ? qsTr("%1 jeux").arg(games.totalCount)
-                  : qsTr("%1 / %2 jeux").arg(games.visibleCount).arg(games.totalCount)
+            spacing: 10
+
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                color: theme.dim
+                font.pixelSize: 20
+                text: games.visibleCount === games.totalCount
+                      ? qsTr("%1 jeux").arg(games.totalCount)
+                      : qsTr("%1 / %2 jeux").arg(games.visibleCount).arg(games.totalCount)
+            }
+
+            // La version, en petit. Sur un appareil mis à jour à la main, c'est le seul
+            // moyen de savoir ce qui tourne sans ouvrir un terminal.
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                color: theme.dim
+                font.pixelSize: 13
+                opacity: 0.7
+                text: "v" + appVersion
+            }
         }
     }
 

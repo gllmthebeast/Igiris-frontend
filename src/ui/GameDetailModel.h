@@ -39,6 +39,17 @@ class GameDetailModel : public QAbstractListModel
     Q_PROPERTY(int year READ year NOTIFY gameChanged)
     // URL de jaquette (§7, §11). Vide si inconnue — la fiche réserve la place quand même.
     Q_PROPERTY(QString coverRef READ coverRef NOTIFY gameChanged)
+    // Image du BANDEAU de la fiche. Distincte de la jaquette par nature : une jaquette est
+    // verticale et porte du texte, un bandeau est large et illustratif.
+    //
+    // L'export 1.4.0 ne fournit AUCUNE image en dehors de cover_ref : bannerRef retombe
+    // donc aujourd'hui sur la jaquette. C'est un pis-aller assumé, et la propriété existe
+    // pour que la vraie image ne demande qu'une ligne le jour où le backend la livre
+    // (demande export-1.5.0). L'interface est déjà bâtie pour elle.
+    Q_PROPERTY(QString bannerRef READ bannerRef NOTIFY gameChanged)
+    // Vrai quand le bandeau montre une image RÉELLEMENT prévue pour ça. Faux tant qu'on
+    // recadre une jaquette : l'interface adoucit alors le rendu au lieu de prétendre.
+    Q_PROPERTY(bool hasRealBanner READ hasRealBanner NOTIFY gameChanged)
     Q_PROPERTY(bool launchAvailable READ launchAvailable NOTIFY capabilitiesChanged)
     Q_PROPERTY(QString launchWarning READ launchWarning NOTIFY capabilitiesChanged)
 
@@ -108,6 +119,8 @@ public:
     int     rating() const { return m_rating; }
     int     year() const { return m_year; }
     QString coverRef() const { return m_coverRef; }
+    QString bannerRef() const { return m_coverRef; }
+    bool    hasRealBanner() const { return false; }
 
     bool    launchAvailable() const;
     QString launchWarning() const;

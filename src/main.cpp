@@ -923,6 +923,10 @@ int main(int argc, char *argv[])
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("games"), &games);
     engine.rootContext()->setContextProperty(QStringLiteral("detail"), &detail);
+    // La version, exposée à l'interface. Sur un appareil mis à jour par scp, savoir CE QUI
+    // tourne sans passer par un terminal est la première question qu'on se pose.
+    engine.rootContext()->setContextProperty(QStringLiteral("appVersion"),
+                                             QStringLiteral(IGIRIS_FRONTEND_VERSION));
 
     // CLAUDE.md §15 : « Erreurs remontées verbatim, jamais avalées ni reformulées. »
     // Un échec de création d'objet QML doit tuer le processus avec un code non nul,
