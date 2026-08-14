@@ -36,6 +36,7 @@ class GameDetailModel : public QAbstractListModel
     Q_PROPERTY(QString gameKey READ gameKey NOTIFY gameChanged)
     Q_PROPERTY(QString title READ title NOTIFY gameChanged)
     Q_PROPERTY(int rating READ rating NOTIFY gameChanged)
+    Q_PROPERTY(int year READ year NOTIFY gameChanged)
     // URL de jaquette (§7, §11). Vide si inconnue — la fiche réserve la place quand même.
     Q_PROPERTY(QString coverRef READ coverRef NOTIFY gameChanged)
     Q_PROPERTY(bool launchAvailable READ launchAvailable NOTIFY capabilitiesChanged)
@@ -62,6 +63,12 @@ public:
         // quelles langues ». Liste de { code, owned } RESTREINTE à cette plateforme —
         // c'est la seule différence de sémantique avec les badges du §8.
         LanguagesRole,
+        // ARCADE seulement, et lu dans exp_romset : le matériel réel (« neogeo », « cps2 »)
+        // qu'IGDB ne connaît pas — il n'a qu'une plateforme « Arcade » globale (§4) — et
+        // l'état du pilote MAME. Vides pour une console.
+        HardwareRole,
+        EmulatorsRole,
+        DriverStatusRole,
     };
 
     explicit GameDetailModel(QObject *parent = nullptr);
@@ -99,6 +106,7 @@ public:
     QString gameKey() const { return m_gameKey; }
     QString title() const { return m_title; }
     int     rating() const { return m_rating; }
+    int     year() const { return m_year; }
     QString coverRef() const { return m_coverRef; }
 
     bool    launchAvailable() const;
@@ -119,6 +127,9 @@ private:
         QString      launchLabel;
         bool         isDefaultChoice = false;
         QVariantList languages;
+        QString      hardware;
+        QString      emulators;
+        QString      driverStatus;
     };
 
     // Rang d'affichage d'une langue : possédée d'abord, puis l'ordre des bits, puis les
@@ -136,6 +147,7 @@ private:
     QString    m_gameKey;
     QString    m_title;
     int        m_rating = 0;
+    int        m_year   = 0;
     QString    m_coverRef;
     QList<Row> m_rows;
 };

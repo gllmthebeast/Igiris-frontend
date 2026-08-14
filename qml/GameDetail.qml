@@ -25,6 +25,42 @@ FocusScope {
         color: sheet.background
     }
 
+    // Fond : la jaquette du jeu, agrandie et très assombrie.
+    //
+    // PAS de flou. Qt 6.5 apporte MultiEffect, mais ce binaire est compilé contre Qt 6.4
+    // pour rester installable sur les hôtes courants (§12) : y recourir échangerait un
+    // effet décoratif contre une contrainte de version. Une opacité basse sous un voile
+    // sombre donne le même résultat perçu, sur n'importe quelle version.
+    //
+    // Le texte passe AVANT tout le reste : un fond qui rend un titre moins lisible sur un
+    // téléviseur, à trois mètres, est un fond raté (§6).
+    Image {
+        id: backdrop
+        anchors.fill: parent
+        source: games.coversEnabled ? detail.coverRef : ""
+        // Recadrage plein cadre : une jaquette est verticale, la fiche horizontale.
+        fillMode: Image.PreserveAspectCrop
+        asynchronous: true
+        cache: true
+        // Décodage borné : c'est la MÊME image que la vignette, mais affichée en grand.
+        // Sans borne, Qt en garderait deux décodages distincts en mémoire.
+        sourceSize.width: 640
+        opacity: status === Image.Ready ? 0.13 : 0
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: 180 } }
+    }
+
+    // Voile : garantit le contraste du texte quelle que soit la jaquette — une pochette
+    // claire ne doit pas rendre le titre illisible.
+    Rectangle {
+        anchors.fill: parent
+        visible: backdrop.visible
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: Qt.rgba(0.06, 0.06, 0.08, 0.55) }
+            GradientStop { position: 1.0; color: Qt.rgba(0.06, 0.06, 0.08, 0.92) }
+        }
+    }
+
     // Le code couleur du §7 est DESSINÉ, pas écrit en emoji : la police du système cible
     // n'en a pas forcément, et un carré vide ne veut rien dire. C'est aussi moins coûteux
     // au défilement.
@@ -51,9 +87,32 @@ FocusScope {
         elide: Text.ElideRight
     }
 
+    // Métadonnées du §7. Elles existaient dans l'export sans être affichées nulle part.
+    Row {
+        id: meta
+        anchors { top: title.bottom; topMargin: 8; left: coverArt.right; leftMargin: 20 }
+        spacing: 18
+
+        Text {
+            visible: detail.year > 0
+            text: detail.year
+            color: sheet.dimColor
+            font.pixelSize: 17
+        }
+
+        Text {
+            visible: detail.rating > 0
+            // « note » et pas « score » : le §5 interdit de la confondre avec emu_score,
+            // qui mesure la fidélité d'ÉMULATION et non la qualité du jeu.
+            text: qsTr("note %1 / 100").arg(detail.rating)
+            color: sheet.dimColor
+            font.pixelSize: 17
+        }
+    }
+
     Text {
         id: warning
-        anchors { top: title.bottom; topMargin: 10; left: coverArt.right; leftMargin: 20
+        anchors { top: meta.bottom; topMargin: 8; left: coverArt.right; leftMargin: 20
                   right: parent.right; rightMargin: 32 }
         visible: text.length > 0
         // Une capacité non déclarée se DIT, elle ne se devine pas (§1).
@@ -87,12 +146,15 @@ FocusScope {
             required property bool isDefaultChoice
             required property string romPath
             required property var languages
+            required property string hardware
+            required property string emulators
+            required property string driverStatus
             required property int index
 
             width: ListView.view.width
             // Deux hauteurs seulement, selon qu'il y ait ou non des langues : la fiche
             // compte quelques lignes, pas 7 581 — le coût d'un layout variable y est nul.
-            height: languages.length > 0 ? 68 : 56
+            height: 56 + (languages.length > 0 ? 12 : 0) + (hardware.length > 0 ? 20 : 0)
 
             // 0 noir, 1 rouge, 2 vert — l'ordre de l'énumération du modèle.
             Rectangle {
@@ -122,6 +184,21 @@ FocusScope {
                 //
                 // Aucune borne, contrairement à la vue liste : la fiche peut se permettre
                 // d'être exhaustive, et c'est justement ce qu'on vient y chercher.
+                // ARCADE : le matériel réel et l'état du pilote. Le §4 le rappelle —
+                // IGDB n'a qu'une plateforme « Arcade » globale, alors que « neogeo » et
+                // « cps2 » ne se ressemblent en rien. L'information était dans l'export
+                // depuis le lot 3 sans jamais être montrée.
+                Text {
+                    visible: platformRow.hardware.length > 0
+                    text: platformRow.hardware
+                          + (platformRow.driverStatus.length > 0
+                             ? "  ·  pilote " + platformRow.driverStatus : "")
+                          + (platformRow.emulators.length > 0
+                             ? "  ·  " + platformRow.emulators : "")
+                    color: platformRow.driverStatus === "preliminary" ? "#d8a657" : sheet.dimColor
+                    font.pixelSize: 15
+                }
+
                 Row {
                     spacing: 6
                     visible: platformRow.languages.length > 0

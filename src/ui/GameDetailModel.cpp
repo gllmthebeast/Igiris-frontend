@@ -82,12 +82,14 @@ void GameDetailModel::setGame(const QString &gameKey)
     m_gameKey = gameKey;
     m_title.clear();
     m_rating = 0;
+    m_year   = 0;
     m_coverRef.clear();
 
     if (m_db && !gameKey.isEmpty()) {
         if (const auto game = m_db->gameByKey(gameKey)) {
             m_title    = game->title;
             m_rating   = game->rating;
+            m_year     = game->year;
             m_coverRef = game->coverRef;
         }
 
@@ -102,6 +104,13 @@ void GameDetailModel::setGame(const QString &gameKey)
             bool &state = languagesByPlatform[language.platformKey][language.langCode];
             state       = state || owned;
         }
+
+        // Les informations d'arcade, par plateforme. Elles existent dans l'export depuis le
+        // début (§4) et n'étaient affichées nulle part : le matériel réel, les émulateurs
+        // capables de lancer le romset, et l'état du pilote.
+        QHash<QString, catalog::Romset> romsetsByPlatform;
+        for (const auto &romset : m_db->romsetsForGame(gameKey))
+            romsetsByPlatform.insert(romset.platformKey, romset);
 
         QSet<QString> seen; // exp_game_platform a pour clé (game_key, display_name)
 
@@ -135,6 +144,13 @@ void GameDetailModel::setGame(const QString &gameKey)
                 badge.insert(QStringLiteral("code"), code);
                 badge.insert(QStringLiteral("owned"), languages.value(code));
                 row.languages.append(badge);
+            }
+
+            const auto romset = romsetsByPlatform.constFind(platform.platformKey);
+            if (romset != romsetsByPlatform.cend()) {
+                row.hardware     = romset->hardware;
+                row.emulators    = romset->emulators;
+                row.driverStatus = romset->driverStatus;
             }
 
             const auto system = m_localSystems.constFind(platform.platformKey);
@@ -271,6 +287,12 @@ QVariant GameDetailModel::data(const QModelIndex &index, int role) const
         return row.isDefaultChoice;
     case LanguagesRole:
         return row.languages;
+    case HardwareRole:
+        return row.hardware;
+    case EmulatorsRole:
+        return row.emulators;
+    case DriverStatusRole:
+        return row.driverStatus;
     default:
         return {};
     }
@@ -284,7 +306,8 @@ QHash<int, QByteArray> GameDetailModel::roleNames() const
         { StatusRole, "status" },           { RomPathRole, "romPath" },
         { LaunchLabelRole, "launchLabel" },
         { DefaultChoiceRole, "isDefaultChoice" },
-        { LanguagesRole, "languages" },
+        { LanguagesRole, "languages" },   { HardwareRole, "hardware" },
+        { EmulatorsRole, "emulators" },   { DriverStatusRole, "driverStatus" },
     };
 }
 
