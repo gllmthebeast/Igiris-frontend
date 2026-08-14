@@ -128,26 +128,103 @@ puis persiste la modification.
 > l'extinction et l'appareil redémarre sur EmulationStation, sans le moindre message
 > d'erreur.
 
-### Tester sans appareil
-
-L'image **x86_64 démarre dans une machine virtuelle** (VirtualBox, ou QEMU avec KVM). C'est
-le moyen le plus rapide d'exercer le vrai chemin de démarrage — serveur d'affichage
-compris — sans matériel dédié.
-
-Reconstruire une image Batocera n'est **pas** nécessaire pour cela, et coûte cher : c'est un
-build Buildroot de plusieurs heures et d'une centaine de gigaoctets, à faire sur une machine
-x86_64. L'image officielle contient déjà tout ce dont le frontend a besoin.
-
 N'oubliez pas le catalogue :
 
 ```sh
 bash tools/fetch-export.sh /userdata/system/igiris
 ```
 
-Pour revenir en arrière : `cp /userdata/system/igiris/autostart.original
-/usr/share/labwc/autostart` puis `batocera-save-overlay`.
+Pour revenir en arrière : restaurez `/userdata/system/igiris/autostart.original` par-dessus
+le fichier patché, puis `batocera-save-overlay`.
 
 Détail de la chaîne de démarrage : [`packaging/batocera/README.md`](packaging/batocera/README.md).
+
+---
+
+## Tester dans une machine virtuelle
+
+**Sans appareil, et sans reconstruire d'image.** L'image x86_64 démarre telle quelle sous
+QEMU, ce qui exerce le **vrai chemin de démarrage** — `startx`, `openbox`, plugin Qt `xcb`.
+C'est la seule chose qu'un rendu `offscreen` ou un `chroot` ne peuvent pas vérifier.
+
+Reconstruire une image Batocera n'est **pas** nécessaire, et coûte cher : un build Buildroot
+de plusieurs heures et d'une centaine de gigaoctets. L'image officielle contient déjà tout.
+
+### Préparer
+
+```bash
+sudo apt install qemu-system-x86 qemu-utils
+
+curl -sSLO https://mirrors.o2switch.fr/batocera/x86_64/stable/last/batocera-x86_64-43.1-20260529.img.gz
+gunzip batocera-x86_64-43.1-20260529.img.gz
+```
+
+Créez un disque de travail plutôt que d'écrire dans l'image : toutes les modifications vont
+dans la surcouche, et **supprimer ce seul fichier vous rend un système neuf**.
+
+```bash
+qemu-img create -f qcow2 -F raw \
+    -b "$PWD/batocera-x86_64-43.1-20260529.img" batocera-test.qcow2 32G
+```
+
+### Démarrer
+
+```bash
+qemu-system-x86_64 -enable-kvm -m 4096 -smp 4 \
+  -drive file=batocera-test.qcow2,format=qcow2,if=virtio \
+  -device virtio-vga -display gtk \
+  -device usb-ehci -device usb-tablet \
+  -netdev user,id=net0,hostfwd=tcp::2222-:22 \
+  -device virtio-net-pci,netdev=net0
+```
+
+Trois choix méritent une explication :
+
+- `-enable-kvm` — sans lui tout est émulé, donc inutilisable. Il suppose un hôte x86_64.
+- `-device virtio-vga` — l'image embarque `virtio_gpu_dri.so` et le pilote X `modesetting` :
+  l'affichage est accéléré au lieu d'être rendu en logiciel.
+- `hostfwd=tcp::2222-:22` — **la pièce maîtresse.** Elle expose le SSH de la machine
+  virtuelle sur le port 2222 de l'hôte, ce qui permet d'installer exactement comme sur un
+  appareil réel. Le serveur SSH (dropbear) est actif par défaut.
+
+L'amorçage fonctionne en BIOS comme en UEFI — l'image porte `syslinux` **et** `EFI/BOOT` —
+donc le SeaBIOS par défaut de QEMU suffit, sans OVMF.
+
+> ⚠️ Batocera 43 impose de **définir un mot de passe root au premier démarrage**. Faites-le
+> dans la fenêtre de la machine virtuelle avant de tenter le moindre `scp`.
+
+### Installer, depuis l'hôte
+
+```bash
+unzip igiris-frontend-1.2.1-x86_64.zip
+cd igiris-frontend-1.2.1-x86_64
+
+scp -P 2222 bin/igiris-frontend root@localhost:/userdata/system/
+scp -P 2222 share/igiris-frontend/packaging/batocera/install-on-device.sh root@localhost:/userdata/system/
+scp -P 2222 share/igiris-frontend/tools/fetch-export.sh root@localhost:/userdata/system/
+
+ssh -p 2222 root@localhost 'sh /userdata/system/install-on-device.sh'
+ssh -p 2222 root@localhost 'bash /userdata/system/fetch-export.sh /userdata/system/igiris'
+ssh -p 2222 root@localhost reboot
+```
+
+Le script doit annoncer **`▶ chaîne détectée : openbox (X11)`**. S'il annonce `labwc`, c'est
+l'image ARM qui a été téléchargée.
+
+### En cas d'écran noir
+
+Le diagnostic est dans la machine, pas dans QEMU :
+
+```bash
+ssh -p 2222 root@localhost 'cat /userdata/system/logs/igiris.log'
+```
+
+Et le retour en arrière ne demande pas de réinstaller :
+
+```bash
+ssh -p 2222 root@localhost \
+  'cp /userdata/system/igiris/autostart.original /etc/X11/xinit/xinitrc && batocera-save-overlay && reboot'
+```
 
 ---
 
