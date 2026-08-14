@@ -172,7 +172,7 @@ qemu-img create -f qcow2 -F raw \
 ```bash
 qemu-system-x86_64 -enable-kvm -m 4096 -smp 4 \
   -drive file=batocera-test.qcow2,format=qcow2,if=virtio \
-  -device virtio-vga -display gtk \
+  -device virtio-vga-gl -display gtk,gl=on \
   -device usb-ehci -device usb-tablet \
   -netdev user,id=net0,hostfwd=tcp::2222-:22 \
   -device virtio-net-pci,netdev=net0
@@ -181,8 +181,21 @@ qemu-system-x86_64 -enable-kvm -m 4096 -smp 4 \
 Trois choix méritent une explication :
 
 - `-enable-kvm` — sans lui tout est émulé, donc inutilisable. Il suppose un hôte x86_64.
-- `-device virtio-vga` — l'image embarque `virtio_gpu_dri.so` et le pilote X `modesetting` :
-  l'affichage est accéléré au lieu d'être rendu en logiciel.
+
+- **`-device virtio-vga-gl` avec `-display gtk,gl=on`** — c'est la ligne à ne pas rater.
+  Le `-gl` et le `gl=on` ne sont pas des raffinements : sans eux, **aucune accélération
+  GL/GLX n'est exposée à l'invité**, et toute application OpenGL échoue au démarrage.
+  EmulationStation le dit crûment (`Error creating SDL window! GLX is not supported`),
+  QEMU affiche « Display output is not active », et le frontend — qui est du Qt Quick —
+  échouerait exactement pareil.
+
+  Le piège est que `virtio_gpu_dri.so` est bien présent dans l'image : c'est **le pilote
+  virgl**, et il ne sert à rien tant que l'hôte ne fournit pas le rendu correspondant.
+  La présence du pilote côté invité ne dit rien de ce que QEMU expose.
+
+  Côté hôte, il faut `libvirglrenderer` et un vrai GPU, et un QEMU assez récent pour
+  connaître `virtio-vga-gl` (vérifié sur QEMU 10.2.1).
+
 - `hostfwd=tcp::2222-:22` — **la pièce maîtresse.** Elle expose le SSH de la machine
   virtuelle sur le port 2222 de l'hôte, ce qui permet d'installer exactement comme sur un
   appareil réel. Le serveur SSH (dropbear) est actif par défaut.
@@ -190,8 +203,10 @@ Trois choix méritent une explication :
 L'amorçage fonctionne en BIOS comme en UEFI — l'image porte `syslinux` **et** `EFI/BOOT` —
 donc le SeaBIOS par défaut de QEMU suffit, sans OVMF.
 
-> ⚠️ Batocera 43 impose de **définir un mot de passe root au premier démarrage**. Faites-le
-> dans la fenêtre de la machine virtuelle avant de tenter le moindre `scp`.
+Le mot de passe root est **`linux`**. Il n'est remplacé par un mot de passe généré que si
+`system.security.enabled=1` est posé dans la configuration — c'est `S35securepasswd` qui en
+décide au démarrage. En cas de doute : `batocera-config getRootPassword` dans la fenêtre de
+la machine virtuelle.
 
 ### Installer, depuis l'hôte
 
@@ -211,13 +226,31 @@ ssh -p 2222 root@localhost reboot
 Le script doit annoncer **`▶ chaîne détectée : openbox (X11)`**. S'il annonce `labwc`, c'est
 l'image ARM qui a été téléchargée.
 
-### En cas d'écran noir
+### Un écran noir ne veut pas dire un échec
+
+Quatre situations produisent un écran noir, et **trois sont normales**. Les distinguer évite
+de chercher un problème qui n'existe pas.
+
+| Écran noir | Ce que c'est | Comment trancher |
+|---|---|---|
+| pendant l'amorçage | **normal** — Batocera démarre en `quiet loglevel=0` sur `tty3` | amorcer le label `verbose`, ou ajouter `console=ttyS0,115200` avec `-serial file:boot.log` |
+| au 1er démarrage, prolongé | **normal** — `autoresize` étend la partition `userdata` | patienter, ne pas conclure trop vite |
+| dans une capture `screendump` (QMP) | **normal avec `gl=on`** — la surface est un tampon GPU que `screendump` ne sait pas lire | se fier à la fenêtre QEMU elle-même, pas à la capture |
+| après le redémarrage, définitif | **là, c'est un vrai échec** | voir ci-dessous |
 
 Le diagnostic est dans la machine, pas dans QEMU :
 
 ```bash
 ssh -p 2222 root@localhost 'cat /userdata/system/logs/igiris.log'
 ```
+
+> ⚠️ **Un log vide n'est pas un échec.** Le frontend n'écrit rien sur sa sortie tant qu'il
+> tourne normalement : la boucle Qt est silencieuse. Un fichier vide signifie « aucune
+> erreur », pas « rien ne s'est lancé ». Pour vérifier qu'il tourne :
+> `ssh -p 2222 root@localhost 'pidof igiris-frontend'`.
+
+Si le log contient `GLX is not supported` ou une erreur de contexte OpenGL, le problème est
+la ligne QEMU, pas le frontend : reprenez `-device virtio-vga-gl -display gtk,gl=on`.
 
 Et le retour en arrière ne demande pas de réinstaller :
 
@@ -238,6 +271,7 @@ ssh -p 2222 root@localhost \
 | `Illegal option -o pipefail` | script lancé avec `sh` | `./fetch-export.sh`, pas `sh fetch-export.sh` |
 | `could not connect to display` | session non graphique (SSH) | lancer depuis le bureau, ou `QT_QPA_PLATFORM=offscreen` |
 | Batocera redémarre sur EmulationStation | overlay non persisté | `batocera-save-overlay` |
+| `GLX is not supported` en VM | QEMU n'expose pas d'accélération | `-device virtio-vga-gl -display gtk,gl=on` |
 
 ---
 
