@@ -815,6 +815,10 @@ int main(int argc, char *argv[])
                                         .split(QLatin1Char(','), Qt::SkipEmptyParts));
         else if (std::strcmp(argv[i], "--lang-owned") == 0)
             games.setLanguageOwnedOnly(true);
+        // Les jaquettes sont la seule donnée distante (§11) : sur un appareil hors ligne,
+        // les couper évite d'empiler des requêtes qui n'aboutiront jamais.
+        else if (std::strcmp(argv[i], "--no-covers") == 0)
+            games.setCoversEnabled(false);
     }
     std::printf("filtres : %d / %d jeux affichés\n", games.visibleCount(),
                 games.totalCount());

@@ -36,6 +36,8 @@ class GameDetailModel : public QAbstractListModel
     Q_PROPERTY(QString gameKey READ gameKey NOTIFY gameChanged)
     Q_PROPERTY(QString title READ title NOTIFY gameChanged)
     Q_PROPERTY(int rating READ rating NOTIFY gameChanged)
+    // URL de jaquette (§7, §11). Vide si inconnue — la fiche réserve la place quand même.
+    Q_PROPERTY(QString coverRef READ coverRef NOTIFY gameChanged)
     Q_PROPERTY(bool launchAvailable READ launchAvailable NOTIFY capabilitiesChanged)
     Q_PROPERTY(QString launchWarning READ launchWarning NOTIFY capabilitiesChanged)
 
@@ -97,6 +99,7 @@ public:
     QString gameKey() const { return m_gameKey; }
     QString title() const { return m_title; }
     int     rating() const { return m_rating; }
+    QString coverRef() const { return m_coverRef; }
 
     bool    launchAvailable() const;
     QString launchWarning() const;
@@ -133,6 +136,7 @@ private:
     QString    m_gameKey;
     QString    m_title;
     int        m_rating = 0;
+    QString    m_coverRef;
     QList<Row> m_rows;
 };
 

@@ -3,8 +3,8 @@
 // Pas de liste de systèmes, pas d'onglets, pas de store. L'entité de premier niveau est le
 // JEU. Et la liste montre TOUS les jeux du catalogue, possédés ou non (§0).
 //
-// Volontairement SANS jaquettes ni badges à ce stade : le §17 fait de la liste nue le point
-// de référence de performance, mesuré avant d'ajouter quoi que ce soit.
+// La liste NUE a servi de référence de performance (§17), avant d'ajouter les badges de
+// langue (lot 8) puis les jaquettes. Les deux ont été mesurés contre elle, pas estimés.
 
 // QtQuick SEUL, sans QtQuick.Controls : chaque module Qt ajouté doit être cross-compilé
 // dans les images Buildroot des distributions cibles (§12). Un champ de saisie ne vaut pas
@@ -249,12 +249,25 @@ Window {
             required property string title
             required property int rating
             required property string gameKey
+            required property string coverRef
             required property var languages
             required property int extraLanguages
             required property int index
 
             width: ListView.view.width
-            height: 52
+            height: 56
+
+            // §6 : la ligne porte une vignette. Sa largeur est FIXE, qu'il y ait une
+            // image ou non : c'est ce qui garantit que tous les titres s'alignent.
+            GameCover {
+                id: cover
+                anchors { left: parent.left; leftMargin: 24; verticalCenter: parent.verticalCenter }
+                width: 33
+                height: 44
+                source: gameRow.coverRef
+                enabled: games.coversEnabled
+                dimColor: theme.dim
+            }
 
             // Pas de colonne « année » : le titre de l'export la porte déjà, sur la
             // TOTALITÉ du catalogue (vérifié : 7 581 titres sur 7 581 finissent par
@@ -262,8 +275,8 @@ Window {
             // dense et lisible à distance (§6).
             Text {
                 anchors {
-                    left: parent.left
-                    leftMargin: 24
+                    left: cover.right
+                    leftMargin: 16
                     right: badges.left
                     rightMargin: 24
                     verticalCenter: parent.verticalCenter

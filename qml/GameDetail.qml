@@ -30,9 +30,20 @@ FocusScope {
     // au défilement.
     readonly property var statusColors: ["#3a3a44", "#b03b3b", "#3f9d4f"] // noir, rouge, vert
 
+    // §7 : « Jaquette, métadonnées, et la liste des systèmes ».
+    GameCover {
+        id: coverArt
+        anchors { top: parent.top; topMargin: 28; left: parent.left; leftMargin: 32 }
+        width: 72
+        height: 96
+        source: detail.coverRef
+        enabled: games.coversEnabled
+        dimColor: sheet.dimColor
+    }
+
     Text {
         id: title
-        anchors { top: parent.top; topMargin: 28; left: parent.left; leftMargin: 32
+        anchors { top: parent.top; topMargin: 28; left: coverArt.right; leftMargin: 20
                   right: parent.right; rightMargin: 32 }
         text: detail.title
         color: sheet.textColor
@@ -42,7 +53,7 @@ FocusScope {
 
     Text {
         id: warning
-        anchors { top: title.bottom; topMargin: 10; left: parent.left; leftMargin: 32
+        anchors { top: title.bottom; topMargin: 10; left: coverArt.right; leftMargin: 20
                   right: parent.right; rightMargin: 32 }
         visible: text.length > 0
         // Une capacité non déclarée se DIT, elle ne se devine pas (§1).
@@ -55,7 +66,7 @@ FocusScope {
     ListView {
         id: platforms
 
-        anchors { top: warning.visible ? warning.bottom : title.bottom; topMargin: 20
+        anchors { top: coverArt.bottom; topMargin: 20
                   left: parent.left; right: parent.right; bottom: legend.top
                   bottomMargin: 12 }
 

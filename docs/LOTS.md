@@ -23,6 +23,7 @@
 | 8 | Badges de langue | badges illuminé/grisé + filtres langue | **1.1.0** | Opus 5 | moyen | ✅ **fait** |
 | 9 | Second adaptateur (Recalbox) | Recalbox marche **sans toucher** au reste | 0.10.0 | Opus 5 | faible en code | ⚠️ **fait — flaw corrigé** |
 | 10 | Empaquetage + démarrage | archive installable + accroche de démarrage | 1.0.0 | Sonnet 5 | moyen | ✅ **fait** |
+| 11 | Jaquettes (hors plan) | vignette en liste + fiche | **1.3.0** | Opus 5 | faible | ✅ **fait** |
 
 ---
 
@@ -119,7 +120,7 @@ Statiques d'abord (index de l'export), dynamiques ensuite (croisement avec l'ind
 | Décennie | statique | ✅ |
 | Arcade | statique | ✅ clés d'arcade lues dans l'export, pas codées |
 | Possédé / manquant | **dynamique** | ✅ après `--roms <dossier>` |
-| Langue (existe / jouable) | statique + dynamique | 🔒 export 1.4.0 requis (§9.2) |
+| Langue (existe / jouable) | statique + dynamique | ✅ lot 8, export 1.4.0 |
 
 **Le filtre dynamique se grise tant qu'aucun scan local n'a eu lieu**, et l'indique
 (« aucun scan local »). Le masquer laisserait croire qu'il n'existe pas ; l'activer sans
@@ -343,6 +344,33 @@ Construire une **image** demande Buildroot et l'activation, dans le `defconfig` 
 cible, de Qt6 (Core/Gui/Qml/Quick), du plugin de plateforme **wayland** et de `libsqlite3`.
 C'est le vrai travail d'integration systeme, propre a chaque distribution, et il se fait
 dans le fork — pas dans ce depot.
+
+### Lot 11 — Jaquettes en vue liste et en fiche · **1.3.0**
+
+Hors plan initial : le §6 prévoit une vignette sur chaque ligne et le §7 une jaquette sur la
+fiche, mais le lot 5 les avait reportées pour garder la liste nue comme référence de
+performance. Les badges sont revenus au lot 8 ; les jaquettes, jamais. C'était un manque de
+conformité au §6, signalé par un test sur appareil réel.
+
+`cover_ref` existait déjà dans l'export — 7 580 jeux sur 7 581 en portent un — mais n'était
+lu par aucune requête. Trois lignes de SQL et un rôle QML.
+
+#### Ce que ce lot assume, et qui n'est pas confortable
+
+C'est la **seule fonctionnalité du projet qui dépend du réseau**, et le §11 la désigne comme
+l'unique entorse au hors-ligne. Conséquences traitées explicitement :
+
+- chargement **asynchrone**, sinon le défilement se bloque sur chaque requête ;
+- `sourceSize` borne la décompression — sans elle, Qt décode à la taille native et garde ça
+  en mémoire, ce qu'un Raspberry Pi ne pardonne pas sur 7 581 entrées ;
+- l'emplacement est **réservé qu'il y ait une image ou non** : une ligne ne change pas de
+  géométrie selon qu'une requête aboutit ;
+- `--no-covers` et la propriété `coversEnabled` coupent la fonctionnalité : sur un appareil
+  hors ligne, empiler des requêtes qui échoueront ne rend service à personne.
+
+Le vrai remède est ailleurs : `docs/demandes-backend/export-1.5.0-images-et-synopsis.md`
+demande un pack d'images hors ligne (27 Mo en vignettes, mesuré) et un synopsis, que
+l'export ne porte pas du tout.
 
 ---
 

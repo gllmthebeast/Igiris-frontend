@@ -247,8 +247,8 @@ QList<Game> ExportDatabase::searchByName(const QString &needle, int limit) const
         return games;
 
     sqlite3_stmt *stmt = prepare(
-        m_db, QStringLiteral("SELECT game_key, title, year, rating, search_key FROM exp_game "
-                             "WHERE search_key LIKE '%' || ? || '%' "
+        m_db, QStringLiteral("SELECT game_key, title, year, rating, search_key, cover_ref "
+                             "FROM exp_game WHERE search_key LIKE '%' || ? || '%' "
                              "ORDER BY rating DESC LIMIT ?"));
     if (!stmt)
         return games;
@@ -264,6 +264,7 @@ QList<Game> ExportDatabase::searchByName(const QString &needle, int limit) const
         game.year    = sqlite3_column_int(stmt, 2);
         game.rating    = sqlite3_column_int(stmt, 3);
         game.searchKey = columnText(stmt, 4);
+        game.coverRef  = columnText(stmt, 5);
         games.append(game);
     }
     sqlite3_finalize(stmt);
@@ -278,7 +279,8 @@ QList<Game> ExportDatabase::allGames() const
 
     sqlite3_stmt *stmt = prepare(m_db,
                                  QStringLiteral("SELECT game_key, title, year, rating, "
-                                                "search_key FROM exp_game ORDER BY title"));
+                                                "search_key, cover_ref FROM exp_game "
+                                                "ORDER BY title"));
     if (!stmt)
         return games;
 
@@ -289,6 +291,7 @@ QList<Game> ExportDatabase::allGames() const
         game.year      = sqlite3_column_int(stmt, 2);
         game.rating    = sqlite3_column_int(stmt, 3);
         game.searchKey = columnText(stmt, 4);
+        game.coverRef  = columnText(stmt, 5);
         games.append(game);
     }
     sqlite3_finalize(stmt);
@@ -301,8 +304,8 @@ std::optional<Game> ExportDatabase::gameByKey(const QString &gameKey) const
         return std::nullopt;
 
     sqlite3_stmt *stmt = prepare(m_db, QStringLiteral("SELECT game_key, title, year, "
-                                                      "rating, search_key FROM exp_game "
-                                                      "WHERE game_key = ?"));
+                                                      "rating, search_key, cover_ref "
+                                                      "FROM exp_game WHERE game_key = ?"));
     if (!stmt)
         return std::nullopt;
     bindText(stmt, 1, gameKey);
@@ -315,6 +318,7 @@ std::optional<Game> ExportDatabase::gameByKey(const QString &gameKey) const
         game.year      = sqlite3_column_int(stmt, 2);
         game.rating    = sqlite3_column_int(stmt, 3);
         game.searchKey = columnText(stmt, 4);
+        game.coverRef  = columnText(stmt, 5);
         result         = game;
     }
     sqlite3_finalize(stmt);

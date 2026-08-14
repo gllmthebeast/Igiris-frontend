@@ -80,6 +80,13 @@ class GameListModel : public QAbstractListModel
     // layout variable pendant le défilement.
     Q_PROPERTY(int maxBadges READ maxBadges CONSTANT)
 
+    // Les jaquettes sont des URL distantes (§11) : c'est la SEULE entorse au hors-ligne de
+    // tout le projet. Sur un appareil sans réseau elles ne chargeront jamais, et empiler
+    // des requêtes qui échouent au défilement ne rend service à personne — d'où
+    // l'interrupteur, et non un simple échec silencieux.
+    Q_PROPERTY(bool coversEnabled READ coversEnabled WRITE setCoversEnabled
+                   NOTIFY coversEnabledChanged)
+
     // --- filtre dynamique --------------------------------------------------------------
     Q_PROPERTY(int ownership READ ownership WRITE setOwnership NOTIFY ownershipChanged)
     // Faux tant qu'aucun scan local n'a alimenté le modèle. L'interface s'adapte au lieu
@@ -93,6 +100,8 @@ public:
         YearRole,
         RatingRole,
         OwnedRole,
+        // URL de jaquette — la SEULE donnée qui exige le réseau (§11). Vide si inconnue.
+        CoverRole,
         // Badges de la ligne : liste bornée de { code, owned }. Deux états et deux
         // seulement — illuminé si une ROM possédée fournit la langue, grisé sinon (§8).
         LanguagesRole,
@@ -158,6 +167,8 @@ public:
     bool        languagesAvailable() const { return !m_languages.isEmpty(); }
     bool        ownedLanguagesAvailable() const { return m_ownedLanguagesAvailable; }
     int         maxBadges() const { return kMaxBadges; }
+    bool        coversEnabled() const { return m_coversEnabled; }
+    void        setCoversEnabled(bool enabled);
 
     // Libellé affichable d'un code — pour l'interface, qui ne doit pas inventer de table.
     Q_INVOKABLE QString languageLabel(const QString &code) const;
@@ -178,6 +189,7 @@ signals:
     void languageOwnedOnlyChanged();
     void languagesChanged();
     void ownedLanguagesAvailableChanged();
+    void coversEnabledChanged();
 
 private:
     // Borne d'affichage du §8. Mesurée sur l'export réel : la moitié du catalogue badgé
@@ -232,6 +244,7 @@ private:
     // Langue de l'interface : elle passe devant les autres dans l'ordre des badges (§8),
     // après les langues possédées.
     QString m_interfaceLanguage;
+    bool    m_coversEnabled = true;
 };
 
 } // namespace igiris::ui

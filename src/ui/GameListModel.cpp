@@ -178,6 +178,15 @@ void GameListModel::setLanguageOwnedOnly(bool ownedOnly)
     rebuild();
 }
 
+void GameListModel::setCoversEnabled(bool enabled)
+{
+    if (m_coversEnabled == enabled)
+        return;
+    m_coversEnabled = enabled;
+    emit coversEnabledChanged();
+    // Aucun rebuild : les jaquettes ne filtrent rien, elles s'affichent ou non.
+}
+
 void GameListModel::setFilter(const QString &filter)
 {
     if (m_filter == filter)
@@ -350,6 +359,8 @@ QVariant GameListModel::data(const QModelIndex &index, int role) const
         return entry.game.rating;
     case OwnedRole:
         return m_ownershipAvailable && m_owned.contains(entry.game.gameKey);
+    case CoverRole:
+        return entry.game.coverRef;
     case LanguagesRole: {
         // Construit à la demande, donc SEULEMENT pour les lignes visibles : le §8 met en
         // garde contre le coût des badges au défilement. Rien n'est stocké par jeu.
@@ -384,6 +395,7 @@ QHash<int, QByteArray> GameListModel::roleNames() const
         { YearRole, "year" },
         { RatingRole, "rating" },
         { OwnedRole, "owned" },
+        { CoverRole, "coverRef" },
         { LanguagesRole, "languages" },
         { ExtraLanguageCountRole, "extraLanguages" },
     };

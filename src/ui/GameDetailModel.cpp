@@ -82,11 +82,13 @@ void GameDetailModel::setGame(const QString &gameKey)
     m_gameKey = gameKey;
     m_title.clear();
     m_rating = 0;
+    m_coverRef.clear();
 
     if (m_db && !gameKey.isEmpty()) {
         if (const auto game = m_db->gameByKey(gameKey)) {
-            m_title  = game->title;
-            m_rating = game->rating;
+            m_title    = game->title;
+            m_rating   = game->rating;
+            m_coverRef = game->coverRef;
         }
 
         // Les langues du jeu, regroupées par plateforme. Une plateforme peut porter

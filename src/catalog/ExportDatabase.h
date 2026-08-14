@@ -50,6 +50,13 @@ struct Game {
     QString searchKey;
     int     year   = 0;
     int     rating = 0;
+    // URL de jaquette. AJOUTÉE EN FIN de structure volontairement : les tests construisent
+    // des Game par initialisation agrégée, et l'insérer au milieu aurait décalé leurs
+    // champs en silence — le compilateur n'aurait rien dit, year serait devenu rating.
+    //
+    // C'est la SEULE donnée du catalogue qui exige le réseau (§11). Vide pour un jeu sans
+    // jaquette connue : 1 jeu sur 7 581 dans l'export actuel.
+    QString coverRef;
 };
 
 // Une plateforme sur laquelle le jeu existe. `platformKey` est vide quand l'export ne
