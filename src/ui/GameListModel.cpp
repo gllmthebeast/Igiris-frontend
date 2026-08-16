@@ -159,6 +159,53 @@ QString GameListModel::languageLabel(const QString &code) const
     return code;
 }
 
+QString GameListModel::modeLabel(const QString &key) const
+{
+    for (const catalog::GameMode &mode : m_modes) {
+        if (mode.key == key)
+            return mode.label;
+    }
+    return key;
+}
+
+void GameListModel::setGameModes(QList<catalog::GameMode> modes)
+{
+    m_modes = std::move(modes);
+
+    m_availableModes.clear();
+    for (const catalog::GameMode &mode : m_modes) {
+        // Un mode sans bit ne serait pas filtrable : le proposer au menu donnerait un
+        // filtre qui ne retient rien tout en paraissant marcher. Aucun n'est dans ce cas
+        // aujourd'hui — les six en portent un — mais un mode ajouté plus tard le pourrait.
+        if (mode.hasBit())
+            m_availableModes.append(mode.key);
+    }
+
+    // Le filtre en cours peut désigner un mode que ce référentiel ne connaît pas : on le
+    // recalcule plutôt que de le garder tel quel.
+    setModeFilter(m_modeFilter);
+    emit modesChanged();
+}
+
+void GameListModel::setModeFilter(const QStringList &keys)
+{
+    quint64 required = 0;
+    for (const QString &key : keys) {
+        for (const catalog::GameMode &mode : m_modes) {
+            if (mode.key == key && mode.hasBit())
+                required |= mode.bit();
+        }
+    }
+
+    if (m_modeFilter == keys && m_requiredModeMask == required)
+        return;
+
+    m_modeFilter       = keys;
+    m_requiredModeMask = required;
+    emit modeFilterChanged();
+    rebuild();
+}
+
 void GameListModel::setLanguageFilter(const QStringList &codes)
 {
     if (m_languageFilter == codes)
@@ -241,6 +288,7 @@ void GameListModel::clearFilters()
     setOwnership(AnyOwnership);
     setLanguageFilter({});
     setLanguageOwnedOnly(false);
+    setModeFilter({});
 }
 
 bool GameListModel::matches(const Entry &entry) const
@@ -284,6 +332,13 @@ bool GameListModel::matches(const Entry &entry) const
         if ((available & m_requiredLangMask) != m_requiredLangMask)
             return false;
     }
+
+    // Modes de jeu — même ET binaire, sur un masque livré sur le même patron. Pas de
+    // variante « possédée » : le mode est une propriété du titre, pas de la ROM, donc
+    // aucun scan n'entre ici et le filtre reste purement statique.
+    if (m_requiredModeMask != 0
+        && (entry.game.modeMask & m_requiredModeMask) != m_requiredModeMask)
+        return false;
 
     return true;
 }

@@ -63,6 +63,37 @@ void feedLanguages(GameListModel &model)
                          { QStringLiteral("igdb-3"), 0b000011 } });
 }
 
+// Le référentiel de modes de l'export 1.6.0, réduit à ce qu'il faut pour le filtre.
+QList<igiris::catalog::GameMode> sampleModes()
+{
+    using igiris::catalog::GameMode;
+    return {
+        { QStringLiteral("solo"), QStringLiteral("Un joueur"), 0 },
+        { QStringLiteral("multi"), QStringLiteral("Multijoueur"), 1 },
+        { QStringLiteral("coop"), QStringLiteral("Coopératif"), 2 },
+    };
+}
+
+// igdb-1 : solo · igdb-2 : solo + multi · igdb-3 : AUCUN mode connu.
+//
+// Ce troisième cas n'est pas un remplissage : 2,9 % du catalogue réel n'a pas de masque,
+// et un filtre qui les retiendrait serait faux.
+void feedModes(GameListModel &model)
+{
+    auto games = sampleGames();
+    games[0].modeMask = 0b001;
+    games[1].modeMask = 0b011;
+    games[2].modeMask = 0;
+
+    const QHash<QString, QStringList> platforms = {
+        { QStringLiteral("igdb-1"), { QStringLiteral("gb") } },
+        { QStringLiteral("igdb-2"), { QStringLiteral("nes") } },
+        { QStringLiteral("igdb-3"), { QStringLiteral("snes") } },
+    };
+    model.setCatalogue(games, platforms, {});
+    model.setGameModes(sampleModes());
+}
+
 } // namespace
 
 class TestGameListModel : public QObject
@@ -101,6 +132,12 @@ private slots:
     void badges_orderOwnedFirstThenCatalogue();
     void badges_areBoundedAndCountTheRest();
     void badges_ownedNeverExceedsTheCatalogue();
+
+    // --- export 1.6.0 : filtre des modes de jeu ---
+    void modes_areUnavailableOnAnExportWithoutThem();
+    void modeFilter_keepsOnlyGamesCarryingThatBit();
+    void modeFilter_multipleModesRequireThemAll();
+    void modeFilter_isClearedByClearFilters();
 };
 
 void TestGameListModel::languages_areUnavailableOnAnExportWithoutThem()
@@ -548,6 +585,80 @@ void TestGameListModel::clearFilters_restoresEverything()
     QVERIFY(!model.arcadeOnly());
     QVERIFY(model.languageFilter().isEmpty());
     QVERIFY(!model.languageOwnedOnly());
+}
+
+void TestGameListModel::modes_areUnavailableOnAnExportWithoutThem()
+{
+    GameListModel model;
+    feed(model); // catalogue sans setGameModes()
+
+    QVERIFY(!model.modesAvailable());
+    QVERIFY(model.availableModes().isEmpty());
+
+    // Et un filtre posé sur un référentiel vide ne doit RIEN retenir de travers : il ne
+    // filtre pas, plutôt que de vider la liste sans explication.
+    model.setModeFilter({ QStringLiteral("multi") });
+    QCOMPARE(model.rowCount(), 3);
+}
+
+void TestGameListModel::modeFilter_keepsOnlyGamesCarryingThatBit()
+{
+    GameListModel model;
+    feedModes(model);
+
+    QVERIFY(model.modesAvailable());
+    QCOMPARE(model.availableModes(),
+             QStringList({ QStringLiteral("solo"), QStringLiteral("multi"),
+                           QStringLiteral("coop") }));
+
+    // Seul igdb-2 porte le bit « multi ». igdb-3, qui n'a AUCUN masque, ne doit pas
+    // passer : un jeu dont on ignore les modes n'est pas un jeu multijoueur.
+    model.setModeFilter({ QStringLiteral("multi") });
+    QCOMPARE(model.rowCount(), 1);
+    QCOMPARE(model.data(model.index(0, 0), GameListModel::TitleRole).toString(),
+             QStringLiteral("The Legend of Zelda"));
+
+    model.setModeFilter({ QStringLiteral("solo") });
+    QCOMPARE(model.rowCount(), 2);
+
+    // Un mode que personne ne porte donne zéro, et c'est la bonne réponse.
+    model.setModeFilter({ QStringLiteral("coop") });
+    QCOMPARE(model.rowCount(), 0);
+
+    // Le libellé vient du référentiel, jamais d'une table écrite dans l'interface.
+    QCOMPARE(model.modeLabel(QStringLiteral("coop")), QStringLiteral("Coopératif"));
+    // Un mode inconnu rend sa clé plutôt que du vide : mieux vaut afficher « coop » qu'une
+    // case blanche si le référentiel change sous nos pieds.
+    QCOMPARE(model.modeLabel(QStringLiteral("mmo")), QStringLiteral("mmo"));
+}
+
+void TestGameListModel::modeFilter_multipleModesRequireThemAll()
+{
+    GameListModel model;
+    feedModes(model);
+
+    // ET binaire, comme les langues : solo ET multi ne laisse passer qu'igdb-2, alors que
+    // chacun pris seul en laisserait passer davantage.
+    model.setModeFilter({ QStringLiteral("solo"), QStringLiteral("multi") });
+    QCOMPARE(model.rowCount(), 1);
+    QCOMPARE(model.data(model.index(0, 0), GameListModel::TitleRole).toString(),
+             QStringLiteral("The Legend of Zelda"));
+
+    model.setModeFilter({ QStringLiteral("solo"), QStringLiteral("coop") });
+    QCOMPARE(model.rowCount(), 0);
+}
+
+void TestGameListModel::modeFilter_isClearedByClearFilters()
+{
+    GameListModel model;
+    feedModes(model);
+
+    model.setModeFilter({ QStringLiteral("multi") });
+    QCOMPARE(model.rowCount(), 1);
+
+    model.clearFilters();
+    QCOMPARE(model.rowCount(), 3);
+    QVERIFY(model.modeFilter().isEmpty());
 }
 
 QTEST_MAIN(TestGameListModel)

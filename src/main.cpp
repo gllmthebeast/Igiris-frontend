@@ -254,6 +254,72 @@ int runExportCommand(const QString &path)
             return 1;
     }
 
+    // [6] Les colonnes des exports 1.5.0 et 1.6.0. Compté sur les lignes réellement lues,
+    // et pas sur ce qu'annonce exp_meta : c'est la seule façon de voir qu'une colonne a
+    // été lue au mauvais indice. La régression que le backend a corrigée en 1.5.0 était
+    // exactement de cette nature — lang_mask parti dans rating, sans une seule erreur.
+    {
+        const auto games   = db.allGames();
+        const auto modes   = db.gameModes();
+        int        artwork = 0, summaries = 0, moded = 0, outOfRegistry = 0;
+
+        quint64 registry = 0;
+        for (const auto &mode : modes)
+            registry |= mode.bit();
+
+        for (const auto &game : games) {
+            artwork += game.artworkRef.isEmpty() ? 0 : 1;
+            summaries += game.summary.isEmpty() ? 0 : 1;
+            if (game.modeMask != 0) {
+                ++moded;
+                // Un bit hors référentiel ne s'afficherait nulle part et ne filtrerait
+                // rien : il passerait donc totalement inaperçu.
+                if ((game.modeMask & ~registry) != 0)
+                    ++outOfRegistry;
+            }
+        }
+
+        const auto pct = [&games](int n) {
+            return games.isEmpty() ? 0.0 : 100.0 * n / games.size();
+        };
+
+        std::printf("\n[6] visuels et fiches\n");
+        std::printf("    bandeaux (artwork_ref) : %d/%lld (%.1f %%)\n", artwork,
+                    static_cast<long long>(games.size()), pct(artwork));
+        std::printf("    synopsis               : %d/%lld (%.1f %%)\n", summaries,
+                    static_cast<long long>(games.size()), pct(summaries));
+        if (modes.isEmpty()) {
+            std::printf("    modes de jeu           : absents de cet export\n");
+        } else {
+            std::printf("    modes de jeu           : %d/%lld (%.1f %%) · %lld au "
+                        "référentiel\n",
+                        moded, static_cast<long long>(games.size()), pct(moded),
+                        static_cast<long long>(modes.size()));
+            if (outOfRegistry > 0) {
+                std::fprintf(stderr,
+                             "✗ %d jeux portent un bit de mode absent du référentiel\n",
+                             outOfRegistry);
+                return 1;
+            }
+        }
+
+        // Années par plateforme : la valeur ajoutée n'est pas la couverture, c'est
+        // l'ÉCART avec l'année du jeu. Sans écart, la colonne serait un doublon.
+        int withYear = 0, differing = 0, rows = 0;
+        for (const auto &game : games) {
+            for (const auto &platform : db.platformsForGame(game.gameKey)) {
+                ++rows;
+                if (platform.releaseYear <= 0)
+                    continue;
+                ++withYear;
+                if (game.year > 0 && platform.releaseYear != game.year)
+                    ++differing;
+            }
+        }
+        std::printf("    années par plateforme  : %d/%d · %d diffèrent de l'année du jeu\n",
+                    withYear, rows, differing);
+    }
+
     if (checked > 0 && matched != checked)
         return 1;
     if (romsetsChecked > 0 && romsetsMatched != romsetsChecked)
@@ -701,6 +767,19 @@ int main(int argc, char *argv[])
         } else {
             std::printf("langues : absentes de cet export (%s) — badges et filtres de "
                         "langue désactivés\n",
+                        qPrintable(catalogue.meta().schemaVersion));
+        }
+
+        // Modes de jeu — export 1.6.0. Même dégradation que les langues : un export
+        // antérieur reste utilisable, simplement sans le filtre.
+        if (catalogue.hasModes()) {
+            const auto modes = catalogue.gameModes();
+            games.setGameModes(modes);
+            detail.setGameModes(modes);
+            std::printf("modes de jeu : %lld au référentiel\n",
+                        static_cast<long long>(modes.size()));
+        } else {
+            std::printf("modes de jeu : absents de cet export (%s) — filtre désactivé\n",
                         qPrintable(catalogue.meta().schemaVersion));
         }
         std::printf("catalogue : %d jeux · %lld plateformes · ouverture %lld ms · "

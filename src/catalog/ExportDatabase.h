@@ -15,6 +15,7 @@
 #include <optional>
 
 struct sqlite3;
+struct sqlite3_stmt;
 
 namespace igiris::catalog {
 
@@ -57,6 +58,30 @@ struct Game {
     // C'est la SEULE donnée du catalogue qui exige le réseau (§11). Vide pour un jeu sans
     // jaquette connue : 1 jeu sur 7 581 dans l'export actuel.
     QString coverRef;
+
+    // --- export 1.5.0 / 1.6.0 -----------------------------------------------------------
+    //
+    // Ajoutés EN FIN, pour la même raison que coverRef ci-dessus : les tests construisent
+    // des Game par initialisation agrégée. Cette règle a déjà sauvé une fois, et elle est
+    // exactement celle que le backend a dû s'appliquer à lui-même après avoir inséré une
+    // colonne au milieu de son SELECT — lang_mask était parti dans rating, sur tout le
+    // catalogue et sans la moindre erreur.
+
+    // ILLUSTRATION de bandeau (1.5.0). Horizontale et composée, SANS texte de pochette :
+    // ce n'est pas une jaquette en plus grand. Vide sur 4,4 % du catalogue, auquel cas la
+    // fiche retombe sur la jaquette en la sachant (voir GameDetailModel::hasRealBanner).
+    QString artworkRef;
+
+    // SYNOPSIS (1.6.0). TOUJOURS EN ANGLAIS — IGDB n'en fournit pas de traduit, et le
+    // backend a délibérément écarté une colonne summary_lang qui aurait porté « en » sur
+    // 100 % des lignes. Renseigné sur 99,7 % du catalogue.
+    QString summary;
+
+    // MODES DE JEU (1.6.0), masque de bits sur le même patron que lang_mask — voir
+    // GameMode. Remplace le « players » demandé au format « 1-4 », que la source ne
+    // couvrait qu'à 12 % : le nombre exact de joueurs n'est pas atteignable, le filtre
+    // « jouable à plusieurs » l'est à 97 %.
+    quint64 modeMask = 0;
 };
 
 // Une plateforme sur laquelle le jeu existe. `platformKey` est vide quand l'export ne
@@ -67,6 +92,14 @@ struct GamePlatform {
     QString displayName;
     int     emuScore    = 0;
     bool    isPreferred = false;
+
+    // Année de sortie SUR CETTE PLATEFORME (export 1.5.0), et non celle du jeu. 0 quand
+    // l'export ne la porte pas.
+    //
+    // Ce n'est pas un doublon de Game::year, qui ne connaît que la PREMIÈRE sortie du
+    // titre : 7 711 lignes sur 18 555 portent une année différente. La fiche affiche
+    // justement ces plateformes côte à côte, et ne pouvait en dater aucune.
+    int releaseYear = 0;
 
     bool isEmulationTarget() const { return !platformKey.isEmpty(); }
 };
@@ -114,6 +147,24 @@ struct Language {
 
     bool     hasBit() const { return bitIndex >= 0; }
     quint64  bit() const { return hasBit() ? (quint64(1) << bitIndex) : 0; }
+};
+
+// Un mode de jeu du référentiel — export 1.6.0.
+//
+// Même patron qu'exp_language, DÉLIBÉRÉMENT : table de référence, bit_index attribué à
+// vie, masque sur exp_game, filtrage par ET binaire. Le code de filtre des langues se
+// réutilise donc tel quel.
+//
+// Une différence tient : ici `bitIndex` n'est jamais NULL — les six modes en portent un.
+// On garde malgré tout la même convention défensive que Language, parce qu'un mode ajouté
+// plus tard sans bit ne doit pas devenir le bit 0 par accident.
+struct GameMode {
+    QString key;   // « solo », « multi », « coop »…
+    QString label; // libellé affichable, fourni par l'export
+    int     bitIndex = -1;
+
+    bool    hasBit() const { return bitIndex >= 0; }
+    quint64 bit() const { return hasBit() ? (quint64(1) << bitIndex) : 0; }
 };
 
 // Quelle ROM apporte quelle langue (§8). Même granularité que exp_rom_hash : c'est ce qui
@@ -209,13 +260,57 @@ public:
     // Le détail par plateforme de la fiche de jeu (§7).
     QList<GameLanguage> languagesForGame(const QString &gameKey) const;
 
+    // --- modes de jeu — export 1.6.0 -----------------------------------------------------
+    //
+    // Détecté comme les langues : sur la présence de la table ET de la colonne, pas sur le
+    // numéro de mineure.
+    bool hasModes() const { return m_hasModes; }
+
+    // Le référentiel complet, ordonné par bit_index. Le backend le livre ENTIER et non
+    // limité aux modes observés : le menu de filtres se construit donc sans dépendre du
+    // contenu du catalogue.
+    QList<GameMode> gameModes() const;
+
+    // Pas de modeMaskByGame() en pendant de langMaskByGame() : le masque de modes voyage
+    // déjà dans Game::modeMask, parce que la fiche l'affiche autant que le filtre s'en
+    // sert. lang_mask, lui, n'a jamais eu besoin de descendre jusqu'au Game.
+    //
+    // Et il n'y aura jamais d'équivalent « possédé » : un mode de jeu est une propriété du
+    // TITRE, pas de la ROM. C'est ce qui le distingue d'une langue, qui varie d'une release
+    // à l'autre — donc un seul filtre ici, là où la langue en a deux.
+
 private:
     bool readMeta(QString *error);
     bool detectLanguageTables() const;
 
+    // Vrai si `table` porte bien `column`. Sert à dégrader proprement sur un export plus
+    // ancien : les mineures sont additives (§2), donc un binaire récent doit lire un vieil
+    // export sans broncher — simplement sans les colonnes qui n'existaient pas.
+    bool hasColumn(const QString &table, const QString &column) const;
+
+    // Le nom de colonne, ou « NULL » quand l'export ne la porte pas. Émis dans le SELECT
+    // pour que le NOMBRE et l'ORDRE des colonnes lues soient les MÊMES quelle que soit la
+    // version de l'export — donc que les indices de lecture restent des constantes.
+    //
+    // C'est exactement le piège dans lequel le générateur est tombé en 1.5.0 : une colonne
+    // insérée au milieu, des indices positionnels décalés, et lang_mask à 0 sur tout le
+    // catalogue sans une seule erreur. Ici la position ne peut pas bouger.
+    QString columnOrNull(bool present, const QString &column) const;
+
+    // La liste de colonnes d'exp_game, et la lecture d'une ligne, écrites UNE fois pour
+    // les trois requêtes qui produisent des Game (recherche, catalogue entier, jeu par
+    // clé). Trois copies de la même énumération, c'est trois occasions de les désaccorder
+    // à la prochaine colonne — et le désaccord serait muet.
+    QString     gameColumns() const;
+    static Game readGame(sqlite3_stmt *stmt);
+
     sqlite3   *m_db = nullptr;
     ExportMeta m_meta;
     bool       m_hasLanguages = false;
+    bool       m_hasArtwork   = false;
+    bool       m_hasSummary   = false;
+    bool       m_hasReleaseYear = false;
+    bool       m_hasModes       = false;
 };
 
 } // namespace igiris::catalog

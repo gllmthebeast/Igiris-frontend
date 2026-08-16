@@ -80,6 +80,24 @@ class GameListModel : public QAbstractListModel
     // layout variable pendant le défilement.
     Q_PROPERTY(int maxBadges READ maxBadges CONSTANT)
 
+    // --- modes de jeu (export 1.6.0) -----------------------------------------------------
+    //
+    // Le filtre « jouable à plusieurs » du §6, enfin calculable. Un seul filtre et non deux
+    // comme pour la langue : un mode est une propriété du TITRE, pas de la ROM possédée —
+    // il n'y a donc pas de version « dynamique » à croiser avec le scan.
+    //
+    // Liste vide = pas de filtre. Plusieurs clés = TOUS exigés, par ET binaire, exactement
+    // comme les langues : le backend a livré ce masque sur le même patron, et c'est le même
+    // code qui le lit.
+    Q_PROPERTY(QStringList modeFilter READ modeFilter WRITE setModeFilter
+                   NOTIFY modeFilterChanged)
+    // Clés proposables, dans l'ordre des bits. Le référentiel est livré ENTIER par l'export
+    // et non limité aux modes observés : le menu ne dépend donc pas du contenu du catalogue.
+    Q_PROPERTY(QStringList availableModes READ availableModes NOTIFY modesChanged)
+    // Faux sur un export antérieur au 1.6.0 : l'interface masque le filtre au lieu d'en
+    // proposer un qui ne retiendrait rien.
+    Q_PROPERTY(bool modesAvailable READ modesAvailable NOTIFY modesChanged)
+
     // Les jaquettes sont des URL distantes (§11) : c'est la SEULE entorse au hors-ligne de
     // tout le projet. Sur un appareil sans réseau elles ne chargeront jamais, et empiler
     // des requêtes qui échouent au défilement ne rend service à personne — d'où
@@ -133,6 +151,10 @@ public:
     // Le masque DYNAMIQUE, issu du croisement export × ROMs possédées. Active « jouable ».
     void setOwnedLanguageMasks(QHash<QString, quint64> maskByGame);
 
+    // Le référentiel de modes de jeu. Pas de masque à passer en second argument,
+    // contrairement aux langues : il voyage déjà dans catalog::Game::modeMask.
+    void setGameModes(QList<catalog::GameMode> modes);
+
     int      rowCount(const QModelIndex &parent = QModelIndex()) const override;
     QVariant data(const QModelIndex &index, int role) const override;
     QHash<int, QByteArray> roleNames() const override;
@@ -170,8 +192,16 @@ public:
     bool        coversEnabled() const { return m_coversEnabled; }
     void        setCoversEnabled(bool enabled);
 
+    QStringList modeFilter() const { return m_modeFilter; }
+    void        setModeFilter(const QStringList &keys);
+    QStringList availableModes() const { return m_availableModes; }
+    bool        modesAvailable() const { return !m_modes.isEmpty(); }
+
     // Libellé affichable d'un code — pour l'interface, qui ne doit pas inventer de table.
     Q_INVOKABLE QString languageLabel(const QString &code) const;
+
+    // Idem pour un mode : le libellé vient de l'export, jamais d'une table écrite ici.
+    Q_INVOKABLE QString modeLabel(const QString &key) const;
 
     // Remet tous les filtres à zéro, recherche comprise.
     Q_INVOKABLE void clearFilters();
@@ -190,6 +220,8 @@ signals:
     void languagesChanged();
     void ownedLanguagesAvailableChanged();
     void coversEnabledChanged();
+    void modeFilterChanged();
+    void modesChanged();
 
 private:
     // Borne d'affichage du §8. Mesurée sur l'export réel : la moitié du catalogue badgé
@@ -245,6 +277,11 @@ private:
     // après les langues possédées.
     QString m_interfaceLanguage;
     bool    m_coversEnabled = true;
+
+    QList<catalog::GameMode> m_modes;
+    QStringList              m_availableModes;
+    QStringList              m_modeFilter;
+    quint64                  m_requiredModeMask = 0;
 };
 
 } // namespace igiris::ui

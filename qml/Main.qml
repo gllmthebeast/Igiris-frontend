@@ -111,12 +111,18 @@ Window {
         id: filterBar
 
         anchors { top: searchBar.bottom; left: parent.left; right: parent.right }
-        height: 60
+        // Un Flow et non une hauteur fixe : les cellules sont assez nombreuses pour
+        // dépasser 1280 px dès qu'une valeur longue est sélectionnée (« existe au
+        // catalogue », « Écran partagé »). Un filtre qui sort de l'écran est pire qu'un
+        // filtre grisé — le §6 veut qu'il reste VISIBLE, y compris quand il ne sert pas.
+        height: filterRow.height + 16
         color: theme.background
 
-        Row {
+        Flow {
             id: filterRow
-            anchors { left: parent.left; leftMargin: 24; verticalCenter: parent.verticalCenter }
+            anchors { top: parent.top; topMargin: 8
+                      left: parent.left; leftMargin: 24
+                      right: parent.right; rightMargin: 24 }
             spacing: 12
 
             FilterCell {
@@ -223,6 +229,37 @@ Window {
                 Component.onCompleted: if (games.languageOwnedOnly) currentIndex = 1
                 onCurrentValueChanged: games.languageOwnedOnly = currentValue !== ""
                 KeyNavigation.left: languageCell
+                KeyNavigation.right: modeCell
+            }
+
+            // Modes de jeu (export 1.6.0) — le filtre « jouable à plusieurs » que le §6
+            // demandait et qu'aucune donnée ne permettait.
+            //
+            // UN seul filtre ici, là où la langue en a deux : un mode est une propriété du
+            // TITRE, pas de la ROM possédée. Il n'y a donc pas de « jouable ici » à lui
+            // opposer, et en inventer un serait faux.
+            FilterCell {
+                id: modeCell
+                KeyNavigation.down: list
+                KeyNavigation.up: searchField
+                label: qsTr("Mode")
+                // Les LIBELLÉS sont affichés, les CLÉS sont envoyées au modèle : les deux
+                // viennent de l'export, l'interface n'en invente ni ne traduit aucun.
+                // La lambda n'est pas décorative : Array.map passe (valeur, index, tableau)
+                // et modeLabel n'accepte qu'un argument — Qt s'en sort, mais en le disant
+                // à chaque mode. Un avertissement qu'on apprend à ignorer est un
+                // avertissement perdu.
+                values: [""].concat(games.availableModes.map(function(key) {
+                    return games.modeLabel(key)
+                }))
+                available: games.modesAvailable
+                unavailableHint: qsTr("export sans modes")
+                textColor: theme.text; dimColor: theme.dim; focusColor: theme.selection
+                // Sur l'index et non sur la valeur : c'est lui qui fait le lien entre le
+                // libellé montré et la clé attendue par le modèle.
+                onCurrentIndexChanged: games.modeFilter =
+                    currentIndex === 0 ? [] : [games.availableModes[currentIndex - 1]]
+                KeyNavigation.left: languageModeCell
             }
         }
     }

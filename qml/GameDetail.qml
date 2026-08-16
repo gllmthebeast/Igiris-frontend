@@ -36,12 +36,10 @@ FocusScope {
     // l'arrière-plan et sous laquelle la liste des systèmes reste sur un fond neutre. Un
     // visuel qui court derrière du texte dense le rend illisible à trois mètres (§6).
     //
-    // ⚠️ L'image affichée est aujourd'hui la JAQUETTE recadrée, faute de mieux : l'export
-    // 1.4.0 ne fournit aucune autre image. Une jaquette est verticale et porte du texte —
-    // l'étirer en bandeau donne un résultat médiocre, et c'est pourquoi le rendu est
-    // volontairement discret tant que `detail.hasRealBanner` est faux. Le jour où le
-    // backend livre une illustration dédiée (demande export-1.5.0), il n'y a rien à
-    // redessiner : seule l'opacité change.
+    // Depuis l'export 1.5.0, c'est une VRAIE illustration (artwork_ref) sur 95,6 % des
+    // fiches : horizontale, composée, sans texte de pochette. Pour les 4,4 % restants on
+    // retombe sur la jaquette recadrée, et le rendu s'adoucit alors au lieu de prétendre —
+    // c'est tout ce que `detail.hasRealBanner` change ici.
     Item {
         id: banner
 
@@ -120,9 +118,41 @@ FocusScope {
             font.pixelSize: 17
         }
 
-        // Ce que l'export ne porte pas, et qui manque visiblement ici : synopsis, nombre
-        // de joueurs, année par plateforme. Demandé au backend (export 1.5.0) plutôt que
-        // deviné sur l'appareil (§0).
+        // Modes de jeu (export 1.6.0). Les libellés viennent de l'export — l'appareil
+        // n'invente aucune table (§0). C'est la réponse au « nombre de joueurs » demandé :
+        // la source ne couvrait « 1-4 » que sur 12 % du catalogue, les modes sur 97 %.
+        Text {
+            visible: detail.modeLabels.length > 0
+            text: detail.modeLabels.join("  ·  ")
+            color: sheet.dimColor
+            font.pixelSize: 17
+        }
+    }
+
+    // Synopsis (export 1.6.0). §7 : « il lui manque ce qui raconte le jeu ».
+    //
+    // TOUJOURS EN ANGLAIS, y compris sur une interface en français : IGDB n'en fournit pas
+    // de traduit. Mieux vaut le texte réel que rien — mais il n'est pas présenté comme s'il
+    // était localisé, et il reste borné : la fiche sert à CHOISIR un système et à lancer,
+    // pas à lire. Trois lignes, élidées, à 3 m d'un téléviseur (§6).
+    Text {
+        id: synopsis
+
+        anchors { top: banner.bottom; topMargin: 12
+                  left: parent.left; leftMargin: 32
+                  right: parent.right; rightMargin: 32 }
+        visible: text.length > 0
+        // Les synopsis d'IGDB contiennent des sauts de ligne : gardés tels quels, la
+        // troisième ligne se réduit à un « … » solitaire dès qu'un paragraphe commence
+        // au mauvais endroit. On les replie en un seul paragraphe — c'est un teaser de
+        // trois lignes, pas un texte à lire.
+        text: detail.summary.replace(/\s+/g, " ").trim()
+        color: sheet.dimColor
+        font.pixelSize: 16
+        lineHeight: 1.25
+        wrapMode: Text.WordWrap
+        maximumLineCount: 3
+        elide: Text.ElideRight
     }
 
     Text {
@@ -140,7 +170,7 @@ FocusScope {
     ListView {
         id: platforms
 
-        anchors { top: banner.bottom; topMargin: 14
+        anchors { top: synopsis.visible ? synopsis.bottom : banner.bottom; topMargin: 14
                   left: parent.left; right: parent.right
                   bottom: colourKey.visible ? colourKey.top : legend.top
                   bottomMargin: 12 }
@@ -165,6 +195,7 @@ FocusScope {
             required property string hardware
             required property string emulators
             required property string driverStatus
+            required property int releaseYear
             required property int index
 
             width: ListView.view.width
@@ -187,8 +218,14 @@ FocusScope {
                 anchors { left: parent.left; leftMargin: 72; verticalCenter: parent.verticalCenter }
                 spacing: 6
 
+                // L'année est celle de la sortie SUR CETTE MACHINE (export 1.5.0), pas
+                // celle du jeu affichée en tête de fiche : 42 % des lignes en diffèrent.
+                // Prince of Persia est Apple ][ 1989 et PC Engine CD 1991 — c'est
+                // exactement ce que cette liste sert à montrer.
                 Text {
                     text: platformRow.displayName + "  ·  " + platformRow.platformKey
+                          + (platformRow.releaseYear > 0
+                             ? "  ·  " + platformRow.releaseYear : "")
                     color: sheet.textColor
                     font.pixelSize: 20
                 }

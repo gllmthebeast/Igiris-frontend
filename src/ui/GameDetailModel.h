@@ -21,6 +21,7 @@
 #include <QHash>
 #include <QSet>
 #include <QString>
+#include <QStringList>
 #include <QVariantList>
 
 namespace igiris::platform {
@@ -42,14 +43,21 @@ class GameDetailModel : public QAbstractListModel
     // Image du BANDEAU de la fiche. Distincte de la jaquette par nature : une jaquette est
     // verticale et porte du texte, un bandeau est large et illustratif.
     //
-    // L'export 1.4.0 ne fournit AUCUNE image en dehors de cover_ref : bannerRef retombe
-    // donc aujourd'hui sur la jaquette. C'est un pis-aller assumé, et la propriété existe
-    // pour que la vraie image ne demande qu'une ligne le jour où le backend la livre
-    // (demande export-1.5.0). L'interface est déjà bâtie pour elle.
+    // Depuis l'export 1.5.0, c'est une VRAIE illustration (artwork_ref) sur 95,6 % du
+    // catalogue. Pour les 4,4 % restants on retombe sur la jaquette recadrée — un pis-aller
+    // que la fiche assume en l'adoucissant, plutôt que de laisser un trou.
     Q_PROPERTY(QString bannerRef READ bannerRef NOTIFY gameChanged)
-    // Vrai quand le bandeau montre une image RÉELLEMENT prévue pour ça. Faux tant qu'on
+    // Vrai quand le bandeau montre une image RÉELLEMENT prévue pour ça. Faux quand on
     // recadre une jaquette : l'interface adoucit alors le rendu au lieu de prétendre.
     Q_PROPERTY(bool hasRealBanner READ hasRealBanner NOTIFY gameChanged)
+    // SYNOPSIS (export 1.6.0). TOUJOURS EN ANGLAIS, y compris sur une interface en
+    // français : IGDB n'en fournit pas de traduit, et le backend a écarté une colonne
+    // summary_lang qui aurait porté « en » sur 100 % des lignes. Vide sur 0,3 % du
+    // catalogue, auquel cas la fiche n'affiche simplement rien.
+    Q_PROPERTY(QString summary READ summary NOTIFY gameChanged)
+    // Modes de jeu du titre, libellés déjà traduits par l'export : [« Un joueur »,
+    // « Coopératif »…]. Vide quand l'export n'en porte pas.
+    Q_PROPERTY(QStringList modeLabels READ modeLabels NOTIFY gameChanged)
     Q_PROPERTY(bool launchAvailable READ launchAvailable NOTIFY capabilitiesChanged)
     Q_PROPERTY(QString launchWarning READ launchWarning NOTIFY capabilitiesChanged)
 
@@ -80,6 +88,10 @@ public:
         HardwareRole,
         EmulatorsRole,
         DriverStatusRole,
+        // Année de sortie SUR CETTE PLATEFORME (export 1.5.0), 0 si inconnue. À ne pas
+        // confondre avec l'année du jeu affichée en tête de fiche : 42 % des lignes en
+        // diffèrent, et c'est précisément ce que cette liste sert à montrer.
+        ReleaseYearRole,
     };
 
     explicit GameDetailModel(QObject *parent = nullptr);
@@ -95,6 +107,10 @@ public:
 
     // Le référentiel de langues, pour l'ordre d'affichage et les libellés.
     void setLanguages(QList<catalog::Language> languages);
+
+    // Le référentiel de modes de jeu, pour les libellés. Injecté plutôt que requêté à
+    // chaque ouverture de fiche, comme les langues : c'est une constante de l'export.
+    void setGameModes(QList<catalog::GameMode> modes);
 
     // Les ROMs possédées, désignées par catalog::romKey(crc32, platformKey). C'est CETTE
     // clé, et pas le chemin, qui décide de l'illumination : la règle du §8 porte sur le
@@ -119,8 +135,12 @@ public:
     int     rating() const { return m_rating; }
     int     year() const { return m_year; }
     QString coverRef() const { return m_coverRef; }
-    QString bannerRef() const { return m_coverRef; }
-    bool    hasRealBanner() const { return false; }
+    // La vraie illustration si l'export en a une, la jaquette sinon — et hasRealBanner dit
+    // laquelle des deux, pour que la fiche ne mente pas sur ce qu'elle montre.
+    QString bannerRef() const { return m_artworkRef.isEmpty() ? m_coverRef : m_artworkRef; }
+    bool    hasRealBanner() const { return !m_artworkRef.isEmpty(); }
+    QString     summary() const { return m_summary; }
+    QStringList modeLabels() const { return m_modeLabels; }
 
     bool    launchAvailable() const;
     QString launchWarning() const;
@@ -143,6 +163,7 @@ private:
         QString      hardware;
         QString      emulators;
         QString      driverStatus;
+        int          releaseYear = 0;
     };
 
     // Rang d'affichage d'une langue : possédée d'abord, puis l'ordre des bits, puis les
@@ -156,13 +177,17 @@ private:
     QHash<QString, QString>               m_ownedRoms;
     QSet<QString>                         m_ownedRomKeys;
     QList<catalog::Language>              m_languages;
+    QList<catalog::GameMode>              m_modes;
 
     QString    m_gameKey;
     QString    m_title;
     int        m_rating = 0;
     int        m_year   = 0;
-    QString    m_coverRef;
-    QList<Row> m_rows;
+    QString     m_coverRef;
+    QString     m_artworkRef;
+    QString     m_summary;
+    QStringList m_modeLabels;
+    QList<Row>  m_rows;
 };
 
 } // namespace igiris::ui

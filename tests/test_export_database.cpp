@@ -59,6 +59,58 @@ bool addLanguages(const QString &path)
     return ok;
 }
 
+// Ajoute les colonnes des 1.5.0 et 1.6.0 : bandeau, synopsis, modes, année par plateforme.
+//
+// Séparé de buildExport() pour la même raison qu'addLanguages() : c'est ce qui permet de
+// vérifier qu'un export ANTÉRIEUR reste lisible avec le même code.
+//
+// ⚠️ Les colonnes sont ajoutées ICI dans un ordre différent de celui de la production —
+// artwork_ref y est au milieu d'exp_game, ici à la fin. C'est délibéré : le chargeur ne
+// doit dépendre que des NOMS de colonnes, jamais de leur position. C'est précisément le
+// décalage positionnel qui avait mis lang_mask à 0 sur tout le catalogue côté backend.
+bool addFiches(const QString &path)
+{
+    sqlite3 *db = nullptr;
+    if (sqlite3_open(path.toUtf8().constData(), &db) != SQLITE_OK)
+        return false;
+
+    const char *sql = R"(
+        ALTER TABLE exp_game ADD COLUMN summary TEXT;
+        ALTER TABLE exp_game ADD COLUMN mode_mask INTEGER;
+        ALTER TABLE exp_game ADD COLUMN artwork_ref TEXT;
+        ALTER TABLE exp_game_platform ADD COLUMN release_year INTEGER;
+
+        CREATE TABLE exp_game_mode(mode_key TEXT PRIMARY KEY, label TEXT NOT NULL,
+                                   bit_index INTEGER NOT NULL);
+        INSERT INTO exp_game_mode VALUES('solo','Un joueur',0),
+                                        ('multi','Multijoueur',1),
+                                        ('coop','Coopératif',2);
+
+        -- igdb-1 : bandeau, synopsis, solo|multi = 3.
+        UPDATE exp_game SET artwork_ref = 'https://img/art1.jpg',
+                            summary     = 'A plumber saves a dinosaur island.',
+                            mode_mask   = 3
+                        WHERE game_key = 'igdb-1';
+        -- igdb-2 : PAS de bandeau ni de synopsis, et solo|coop = 5. C'est le cas des 4,4 %
+        -- du catalogue sans illustration : la fiche doit retomber sur la jaquette.
+        UPDATE exp_game SET mode_mask = 5 WHERE game_key = 'igdb-2';
+
+        -- L'année diffère de celle du jeu (1990) sur une plateforme et pas sur l'autre :
+        -- c'est tout l'intérêt de la colonne, et le cas où un doublon se verrait.
+        UPDATE exp_game_platform SET release_year = 1990
+            WHERE game_key = 'igdb-1' AND display_name = 'Super Nintendo';
+        UPDATE exp_game_platform SET release_year = 1992
+            WHERE game_key = 'igdb-1' AND batocera_system IS NULL;
+    )";
+
+    char      *errmsg = nullptr;
+    const bool ok     = sqlite3_exec(db, sql, nullptr, nullptr, &errmsg) == SQLITE_OK;
+    if (errmsg)
+        sqlite3_free(errmsg);
+    sqlite3_close(db);
+    return ok;
+}
+
 // Construit un export minimal au schéma 1.3.0.
 bool buildExport(const QString &path, const QString &schemaVersion)
 {
@@ -141,6 +193,12 @@ private slots:
     void ownedLangMask_countsOnlyOwnedRoms();
     void ownedLangMask_isPerPlatformNotPerCrcAlone();
     void languagesForGame_keepsCodesWithoutBit();
+
+    // --- exports 1.5.0 et 1.6.0 : bandeau, synopsis, modes, année par plateforme ---
+    void fiches_absentFromOlderExportWithoutBreakingIt();
+    void fiches_readColumnsByNameNotByPosition();
+    void gameModes_orderedByBit();
+    void releaseYear_isPerPlatformAndZeroWhenUnknown();
 
     void realExport_ifPresent();
 };
@@ -458,6 +516,146 @@ void TestExportDatabase::romsetsForGame_roundTripsWithFindByRomset()
     const auto found = db.findByRomset(romsets.first().romset, romsets.first().platformKey);
     QVERIFY(found.has_value());
     QCOMPARE(found->gameKey, QStringLiteral("igdb-2"));
+}
+
+void TestExportDatabase::fiches_absentFromOlderExportWithoutBreakingIt()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath("games.db");
+    QVERIFY(buildExport(path, "1.4.0"));
+    QVERIFY(addLanguages(path));
+
+    ExportDatabase db;
+    QString        error;
+    // Un export 1.4.0 s'ouvre normalement : la 1.5.0 et la 1.6.0 sont additives (§2).
+    QVERIFY2(db.open(path, &error), qPrintable(error));
+    QVERIFY(!db.hasModes());
+    QVERIFY(db.gameModes().isEmpty());
+
+    // Et les champs manquants rendent du vide, sans requête en échec : les SELECT émettent
+    // « NULL » à la place de la colonne absente, donc rien ne se décale.
+    const auto game = db.gameByKey(QStringLiteral("igdb-1"));
+    QVERIFY(game.has_value());
+    QVERIFY(game->artworkRef.isEmpty());
+    QVERIFY(game->summary.isEmpty());
+    QCOMPARE(game->modeMask, quint64(0));
+
+    // Ce qui existait AVANT doit être intact : c'est le vrai risque d'une colonne ajoutée.
+    QCOMPARE(game->title, QStringLiteral("Super Mario World"));
+    QCOMPARE(game->year, 1990);
+    QCOMPARE(game->rating, 96);
+
+    const auto platforms = db.platformsForGame(QStringLiteral("igdb-1"));
+    QCOMPARE(platforms.size(), 2);
+    QCOMPARE(platforms.first().releaseYear, 0);
+    QCOMPARE(platforms.first().emuScore, 95);
+}
+
+void TestExportDatabase::fiches_readColumnsByNameNotByPosition()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath("games.db");
+    QVERIFY(buildExport(path, "1.6.0"));
+    QVERIFY(addLanguages(path));
+    QVERIFY(addFiches(path));
+
+    ExportDatabase db;
+    QString        error;
+    QVERIFY2(db.open(path, &error), qPrintable(error));
+    QVERIFY(db.hasModes());
+
+    const auto game = db.gameByKey(QStringLiteral("igdb-1"));
+    QVERIFY(game.has_value());
+    QCOMPARE(game->artworkRef, QStringLiteral("https://img/art1.jpg"));
+    QCOMPARE(game->summary, QStringLiteral("A plumber saves a dinosaur island."));
+    QCOMPARE(game->modeMask, quint64(3));
+
+    // LE test qui compte : les champs préexistants n'ont pas bougé alors que trois
+    // colonnes se sont ajoutées, dans un ordre différent de la production. Un chargeur
+    // qui lirait par position aurait ici year dans rating, silencieusement.
+    QCOMPARE(game->title, QStringLiteral("Super Mario World"));
+    QCOMPARE(game->searchKey, QStringLiteral("super mario world"));
+    QCOMPARE(game->year, 1990);
+    QCOMPARE(game->rating, 96);
+
+    // Le jeu sans illustration : vide, et surtout pas la jaquette recopiée ici — c'est la
+    // fiche qui décide du repli, et elle doit pouvoir distinguer les deux cas.
+    const auto other = db.gameByKey(QStringLiteral("igdb-2"));
+    QVERIFY(other.has_value());
+    QVERIFY(other->artworkRef.isEmpty());
+    QVERIFY(other->summary.isEmpty());
+    QCOMPARE(other->modeMask, quint64(5));
+
+    // Les trois requêtes qui produisent des Game partagent la même liste de colonnes :
+    // elles doivent donc lire exactement la même chose.
+    const auto searched = db.searchByName(QStringLiteral("mario"));
+    QCOMPARE(searched.size(), 1);
+    QCOMPARE(searched.first().artworkRef, game->artworkRef);
+    QCOMPARE(searched.first().modeMask, game->modeMask);
+
+    for (const auto &listed : db.allGames()) {
+        if (listed.gameKey == game->gameKey) {
+            QCOMPARE(listed.summary, game->summary);
+            QCOMPARE(listed.modeMask, game->modeMask);
+        }
+    }
+}
+
+void TestExportDatabase::gameModes_orderedByBit()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath("games.db");
+    QVERIFY(buildExport(path, "1.6.0"));
+    QVERIFY(addFiches(path));
+
+    ExportDatabase db;
+    QVERIFY(db.open(path, nullptr));
+
+    const auto modes = db.gameModes();
+    QCOMPARE(modes.size(), 3);
+    QCOMPARE(modes.at(0).key, QStringLiteral("solo"));
+    QCOMPARE(modes.at(1).key, QStringLiteral("multi"));
+    QCOMPARE(modes.at(2).key, QStringLiteral("coop"));
+    QCOMPARE(modes.at(0).label, QStringLiteral("Un joueur"));
+
+    // Le bit se lit dans l'export, il ne se déduit JAMAIS de la position dans la liste —
+    // même règle que pour les langues (§8), et pour la même raison : un décalage
+    // produirait des filtres faux sans rien signaler.
+    QCOMPARE(modes.at(2).bit(), quint64(4));
+
+    // igdb-1 est solo|multi : coop ne doit PAS ressortir.
+    const auto game = db.gameByKey(QStringLiteral("igdb-1"));
+    QVERIFY(game.has_value());
+    QVERIFY(game->modeMask & modes.at(0).bit());
+    QVERIFY(game->modeMask & modes.at(1).bit());
+    QVERIFY(!(game->modeMask & modes.at(2).bit()));
+}
+
+void TestExportDatabase::releaseYear_isPerPlatformAndZeroWhenUnknown()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath("games.db");
+    QVERIFY(buildExport(path, "1.6.0"));
+    QVERIFY(addFiches(path));
+
+    ExportDatabase db;
+    QVERIFY(db.open(path, nullptr));
+
+    const auto platforms = db.platformsForGame(QStringLiteral("igdb-1"));
+    QCOMPARE(platforms.size(), 2);
+
+    // L'ordre vient de la requête : is_preferred d'abord. La SNES est l'élue.
+    QCOMPARE(platforms.at(0).displayName, QStringLiteral("Super Nintendo"));
+    QCOMPARE(platforms.at(0).releaseYear, 1990);
+
+    // La seconde porte 1992 alors que le JEU est de 1990 : c'est exactement ce que la
+    // colonne apporte, et une année recopiée depuis exp_game passerait ce test à côté.
+    QCOMPARE(platforms.at(1).releaseYear, 1992);
+
+    // Année inconnue = 0, jamais une valeur inventée : la fiche n'affiche alors rien.
+    const auto arcade = db.platformsForGame(QStringLiteral("igdb-2"));
+    QCOMPARE(arcade.size(), 1);
+    QCOMPARE(arcade.first().releaseYear, 0);
 }
 
 void TestExportDatabase::realExport_ifPresent()

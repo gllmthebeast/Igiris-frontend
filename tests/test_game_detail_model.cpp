@@ -142,7 +142,147 @@ private slots:
     void languages_areRestrictedToTheirOwnPlatform();
     void languages_surviveWithoutABitIndex();
     void languages_stayEmptyOnAnExportWithoutThem();
+
+    // --- exports 1.5.0 et 1.6.0 : bandeau, synopsis, modes, année par plateforme ---
+    void banner_fallsBackToTheCoverAndSaysSo();
+    void banner_usesTheArtworkWhenTheExportHasOne();
+    void releaseYear_isExposedPerPlatformRow();
 };
+
+// Ajoute les colonnes des 1.5.0 / 1.6.0 à l'export de test. `artwork` vide simule les
+// 4,4 % du catalogue réel qui n'ont pas d'illustration dédiée.
+namespace {
+bool addFiches(const QString &path, const QString &artwork)
+{
+    sqlite3 *db = nullptr;
+    if (sqlite3_open(path.toUtf8().constData(), &db) != SQLITE_OK)
+        return false;
+
+    const QString sql =
+        QStringLiteral(
+            "ALTER TABLE exp_game ADD COLUMN artwork_ref TEXT;"
+            "ALTER TABLE exp_game ADD COLUMN summary TEXT;"
+            "ALTER TABLE exp_game ADD COLUMN mode_mask INTEGER;"
+            "ALTER TABLE exp_game_platform ADD COLUMN release_year INTEGER;"
+            "CREATE TABLE exp_game_mode(mode_key TEXT PRIMARY KEY, label TEXT NOT NULL,"
+            " bit_index INTEGER NOT NULL);"
+            "INSERT INTO exp_game_mode VALUES('solo','Un joueur',0),('coop','Coopératif',2);"
+            "UPDATE exp_game SET artwork_ref = %1, summary = 'A blue robot fights again.',"
+            " mode_mask = 5;"
+            // La SNES sort en 1995 comme le jeu, la PS1 deux ans plus tard : c'est l'écart
+            // qui justifie la colonne, et un test sans écart ne prouverait rien.
+            // SNES et SFAM sont la MÊME clé de plateforme et fusionnent en une ligne : les
+            // dater toutes les deux, sinon le test dépend de laquelle survit à la fusion.
+            "UPDATE exp_game_platform SET release_year = 1995"
+            " WHERE display_name IN ('SNES','SFAM');"
+            "UPDATE exp_game_platform SET release_year = 1997 WHERE display_name = 'PS1';")
+            .arg(artwork.isEmpty() ? QStringLiteral("NULL")
+                                   : QStringLiteral("'%1'").arg(artwork));
+
+    char      *errmsg = nullptr;
+    const bool ok = sqlite3_exec(db, sql.toUtf8().constData(), nullptr, nullptr, &errmsg)
+                    == SQLITE_OK;
+    if (errmsg)
+        sqlite3_free(errmsg);
+    sqlite3_close(db);
+    return ok;
+}
+} // namespace
+
+void TestGameDetailModel::banner_fallsBackToTheCoverAndSaysSo()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath("games.db");
+    QVERIFY(buildExport(path));
+    // Export 1.3.0 tel quel : aucune des colonnes n'existe.
+    ExportDatabase db;
+    QVERIFY(db.open(path, nullptr));
+
+    GameDetailModel model;
+    model.setCatalogue(&db);
+    model.setGame(QStringLiteral("igdb-1"));
+
+    // Sans illustration, la fiche retombe sur la jaquette ET LE DIT : c'est hasRealBanner
+    // qui pilote l'adoucissement du rendu. Le mensonge serait de renvoyer true ici.
+    QVERIFY(!model.hasRealBanner());
+    QCOMPARE(model.bannerRef(), model.coverRef());
+    QVERIFY(model.summary().isEmpty());
+    QVERIFY(model.modeLabels().isEmpty());
+}
+
+void TestGameDetailModel::banner_usesTheArtworkWhenTheExportHasOne()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath("games.db");
+    QVERIFY(buildExport(path));
+    QVERIFY(addFiches(path, QStringLiteral("https://img/art.jpg")));
+
+    ExportDatabase db;
+    QVERIFY(db.open(path, nullptr));
+
+    GameDetailModel model;
+    model.setCatalogue(&db);
+    model.setGameModes(db.gameModes());
+    model.setGame(QStringLiteral("igdb-1"));
+
+    QVERIFY(model.hasRealBanner());
+    QCOMPARE(model.bannerRef(), QStringLiteral("https://img/art.jpg"));
+    QVERIFY(model.bannerRef() != model.coverRef());
+    QCOMPARE(model.summary(), QStringLiteral("A blue robot fights again."));
+
+    // mode_mask = 5 = solo(0) | coop(2). Les libellés viennent du référentiel, et l'ordre
+    // est celui des bits — jamais celui de la table ni l'alphabétique.
+    QCOMPARE(model.modeLabels(),
+             QStringList({ QStringLiteral("Un joueur"), QStringLiteral("Coopératif") }));
+
+    // Le cas des 4,4 % : colonne présente mais vide → repli, et la fiche le sait.
+    QTemporaryDir bare;
+    const QString barePath = bare.filePath("games.db");
+    QVERIFY(buildExport(barePath));
+    QVERIFY(addFiches(barePath, QString()));
+    ExportDatabase bareDb;
+    QVERIFY(bareDb.open(barePath, nullptr));
+
+    GameDetailModel bareModel;
+    bareModel.setCatalogue(&bareDb);
+    bareModel.setGame(QStringLiteral("igdb-1"));
+    QVERIFY(!bareModel.hasRealBanner());
+    QCOMPARE(bareModel.bannerRef(), bareModel.coverRef());
+}
+
+void TestGameDetailModel::releaseYear_isExposedPerPlatformRow()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath("games.db");
+    QVERIFY(buildExport(path));
+    QVERIFY(addFiches(path, QStringLiteral("https://img/art.jpg")));
+
+    ExportDatabase db;
+    QVERIFY(db.open(path, nullptr));
+
+    GameDetailModel model;
+    model.setCatalogue(&db);
+    model.setLocalSystems({ { QStringLiteral("snes"), system("snes", "Super Nintendo") },
+                            { QStringLiteral("psx"), system("psx", "PlayStation") } });
+    model.setGame(QStringLiteral("igdb-1"));
+
+    QHash<QString, int> yearByPlatform;
+    for (int row = 0; row < model.rowCount(); ++row) {
+        const auto index = model.index(row, 0);
+        yearByPlatform.insert(
+            model.data(index, GameDetailModel::PlatformKeyRole).toString(),
+            model.data(index, GameDetailModel::ReleaseYearRole).toInt());
+    }
+
+    // L'année du JEU est 1995 ; la PS1 porte 1997. Une fiche qui recopierait exp_game.year
+    // afficherait 1995 partout et passerait ce test à côté.
+    QCOMPARE(model.year(), 1995);
+    QCOMPARE(yearByPlatform.value(QStringLiteral("snes")), 1995);
+    QCOMPARE(yearByPlatform.value(QStringLiteral("psx")), 1997);
+
+    // Année inconnue = 0 : la fiche n'affiche alors rien plutôt qu'une date inventée.
+    QCOMPARE(yearByPlatform.value(QStringLiteral("wiiu")), 0);
+}
 
 void TestGameDetailModel::languages_areRestrictedToTheirOwnPlatform()
 {

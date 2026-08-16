@@ -56,6 +56,13 @@ void GameDetailModel::setLanguages(QList<catalog::Language> languages)
         setGame(m_gameKey);
 }
 
+void GameDetailModel::setGameModes(QList<catalog::GameMode> modes)
+{
+    m_modes = std::move(modes);
+    if (!m_gameKey.isEmpty())
+        setGame(m_gameKey);
+}
+
 void GameDetailModel::setOwnedRomKeys(QSet<QString> ownedRomKeys)
 {
     m_ownedRomKeys = std::move(ownedRomKeys);
@@ -84,13 +91,27 @@ void GameDetailModel::setGame(const QString &gameKey)
     m_rating = 0;
     m_year   = 0;
     m_coverRef.clear();
+    m_artworkRef.clear();
+    m_summary.clear();
+    m_modeLabels.clear();
 
     if (m_db && !gameKey.isEmpty()) {
         if (const auto game = m_db->gameByKey(gameKey)) {
-            m_title    = game->title;
-            m_rating   = game->rating;
-            m_year     = game->year;
-            m_coverRef = game->coverRef;
+            m_title      = game->title;
+            m_rating     = game->rating;
+            m_year       = game->year;
+            m_coverRef   = game->coverRef;
+            m_artworkRef = game->artworkRef;
+            m_summary    = game->summary;
+
+            // Les libellés viennent du référentiel, jamais d'une table écrite ici : le
+            // bit_index est attribué à vie par le backend, et déduire un mode de sa
+            // position produirait un libellé faux, silencieusement — exactement le piège
+            // déjà posé pour les langues (§8).
+            for (const auto &mode : m_modes) {
+                if (mode.hasBit() && (game->modeMask & mode.bit()))
+                    m_modeLabels.append(mode.label);
+            }
         }
 
         // Les langues du jeu, regroupées par plateforme. Une plateforme peut porter
@@ -126,6 +147,7 @@ void GameDetailModel::setGame(const QString &gameKey)
             row.displayName = platform.displayName;
             row.emuScore    = platform.emuScore;
             row.isPreferred = platform.isPreferred;
+            row.releaseYear = platform.releaseYear;
             row.romPath     = m_ownedRoms.value(ownedKey(gameKey, platform.platformKey));
 
             const auto languages = languagesByPlatform.value(platform.platformKey);
@@ -167,13 +189,16 @@ void GameDetailModel::setGame(const QString &gameKey)
             m_rows.append(row);
         }
     }
-    // Le §7 veut « le système marqué is_preferred proposé par défaut ». Impossible en
-    // l'état : l'export marque is_preferred sur 18 116 des 18 555 lignes, et 3 932 jeux
-    // ont PLUSIEURS plateformes élues. Le champ ne discrimine rien.
+    // Le §7 veut « le système marqué is_preferred proposé par défaut ». Le champ est
+    // désormais fiable — le backend l'a corrigé en 1.4.0, il ne marque plus que 31 lignes,
+    // sans jeu à double élection — mais il ne tranche donc que pour 31 lignes sur 18 555.
     //
-    // Le défaut retenu est donc le premier système JOUABLE — vert, puis meilleur score
-    // d'émulation, l'ordre venant déjà de la requête. À défaut de vert, la première
-    // ligne. Voir la note du lot 7 dans docs/LOTS.md.
+    // Le défaut reste le premier système JOUABLE : vert, puis is_preferred, puis meilleur
+    // score d'émulation — l'ordre vient déjà de la requête, donc une plateforme élue ET
+    // verte sort naturellement en tête. À défaut de vert, la première ligne.
+    //
+    // Ce n'est plus un pis-aller : proposer par défaut un système dont l'utilisateur n'a
+    // pas la ROM ne serait pas lançable, alors que c'est l'unique geste de cette fiche.
     int defaultRow = -1;
     for (int i = 0; i < m_rows.size(); ++i) {
         if (m_rows.at(i).status == Green) {
@@ -293,6 +318,8 @@ QVariant GameDetailModel::data(const QModelIndex &index, int role) const
         return row.emulators;
     case DriverStatusRole:
         return row.driverStatus;
+    case ReleaseYearRole:
+        return row.releaseYear;
     default:
         return {};
     }
@@ -308,6 +335,7 @@ QHash<int, QByteArray> GameDetailModel::roleNames() const
         { DefaultChoiceRole, "isDefaultChoice" },
         { LanguagesRole, "languages" },   { HardwareRole, "hardware" },
         { EmulatorsRole, "emulators" },   { DriverStatusRole, "driverStatus" },
+        { ReleaseYearRole, "releaseYear" },
     };
 }
 

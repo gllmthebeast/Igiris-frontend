@@ -44,6 +44,30 @@ QString platformColumn()
     return QString::fromLatin1(schema::kPlatformKeyColumn);
 }
 
+// Compte une requête qui ne renvoie qu'un entier. Renvoie 0 si quoi que ce soit échoue —
+// l'appelant en déduit une absence, et dégrade au lieu de planter.
+int scalar(sqlite3 *db, const QString &sql, const QString &arg)
+{
+    sqlite3_stmt *stmt = prepare(db, sql);
+    if (!stmt)
+        return 0;
+    bindText(stmt, 1, arg);
+    int value = 0;
+    if (sqlite3_step(stmt) == SQLITE_ROW)
+        value = sqlite3_column_int(stmt, 0);
+    sqlite3_finalize(stmt);
+    return value;
+}
+
+bool hasTable(sqlite3 *db, const QString &name)
+{
+    return scalar(db,
+                  QStringLiteral("SELECT COUNT(*) FROM sqlite_master "
+                                 "WHERE type = 'table' AND name = ?"),
+                  name)
+           == 1;
+}
+
 } // namespace
 
 ExportDatabase::~ExportDatabase()
@@ -95,6 +119,16 @@ bool ExportDatabase::open(const QString &path, QString *error)
     }
 
     m_hasLanguages = detectLanguageTables();
+
+    // Colonnes ajoutées par les mineures 1.5.0 et 1.6.0. Détectées une fois à l'ouverture,
+    // sur la présence réelle de la colonne : un export antérieur reste lisible, simplement
+    // sans bandeau, sans synopsis et sans filtre de modes (§2, les mineures sont additives).
+    m_hasArtwork     = hasColumn(QStringLiteral("exp_game"), QStringLiteral("artwork_ref"));
+    m_hasSummary     = hasColumn(QStringLiteral("exp_game"), QStringLiteral("summary"));
+    m_hasReleaseYear = hasColumn(QStringLiteral("exp_game_platform"),
+                                 QStringLiteral("release_year"));
+    m_hasModes       = hasColumn(QStringLiteral("exp_game"), QStringLiteral("mode_mask"))
+                 && hasTable(m_db, QStringLiteral("exp_game_mode"));
 
     if (m_meta.major != schema::kSupportedMajor) {
         const QString message =
@@ -240,16 +274,44 @@ std::optional<RomsetMatch> ExportDatabase::findByRomset(const QString &romset,
     return result;
 }
 
+QString ExportDatabase::gameColumns() const
+{
+    // Les colonnes absentes sont émises en « NULL » plutôt qu'omises : la requête garde le
+    // MÊME nombre de colonnes dans le MÊME ordre quelle que soit la version de l'export,
+    // donc readGame() lit des indices constants. Une colonne qui apparaît ne peut pas
+    // décaler celles qui la suivent.
+    return QStringLiteral("game_key, title, year, rating, search_key, cover_ref, %1, %2, %3")
+        .arg(columnOrNull(m_hasArtwork, QStringLiteral("artwork_ref")),
+             columnOrNull(m_hasSummary, QStringLiteral("summary")),
+             columnOrNull(m_hasModes, QStringLiteral("mode_mask")));
+}
+
+Game ExportDatabase::readGame(sqlite3_stmt *stmt)
+{
+    Game game;
+    game.gameKey    = columnText(stmt, 0);
+    game.title      = columnText(stmt, 1);
+    game.year       = sqlite3_column_int(stmt, 2);
+    game.rating     = sqlite3_column_int(stmt, 3);
+    game.searchKey  = columnText(stmt, 4);
+    game.coverRef   = columnText(stmt, 5);
+    game.artworkRef = columnText(stmt, 6);
+    game.summary    = columnText(stmt, 7);
+    game.modeMask   = static_cast<quint64>(sqlite3_column_int64(stmt, 8));
+    return game;
+}
+
 QList<Game> ExportDatabase::searchByName(const QString &needle, int limit) const
 {
     QList<Game> games;
     if (!m_db || needle.isEmpty())
         return games;
 
-    sqlite3_stmt *stmt = prepare(
-        m_db, QStringLiteral("SELECT game_key, title, year, rating, search_key, cover_ref "
-                             "FROM exp_game WHERE search_key LIKE '%' || ? || '%' "
-                             "ORDER BY rating DESC LIMIT ?"));
+    sqlite3_stmt *stmt =
+        prepare(m_db, QStringLiteral("SELECT %1 FROM exp_game "
+                                     "WHERE search_key LIKE '%' || ? || '%' "
+                                     "ORDER BY rating DESC LIMIT ?")
+                          .arg(gameColumns()));
     if (!stmt)
         return games;
 
@@ -257,16 +319,8 @@ QList<Game> ExportDatabase::searchByName(const QString &needle, int limit) const
     bindText(stmt, 1, needle.toLower());
     sqlite3_bind_int(stmt, 2, limit);
 
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        Game game;
-        game.gameKey = columnText(stmt, 0);
-        game.title   = columnText(stmt, 1);
-        game.year    = sqlite3_column_int(stmt, 2);
-        game.rating    = sqlite3_column_int(stmt, 3);
-        game.searchKey = columnText(stmt, 4);
-        game.coverRef  = columnText(stmt, 5);
-        games.append(game);
-    }
+    while (sqlite3_step(stmt) == SQLITE_ROW)
+        games.append(readGame(stmt));
     sqlite3_finalize(stmt);
     return games;
 }
@@ -277,23 +331,13 @@ QList<Game> ExportDatabase::allGames() const
     if (!m_db)
         return games;
 
-    sqlite3_stmt *stmt = prepare(m_db,
-                                 QStringLiteral("SELECT game_key, title, year, rating, "
-                                                "search_key, cover_ref FROM exp_game "
-                                                "ORDER BY title"));
+    sqlite3_stmt *stmt = prepare(
+        m_db, QStringLiteral("SELECT %1 FROM exp_game ORDER BY title").arg(gameColumns()));
     if (!stmt)
         return games;
 
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        Game game;
-        game.gameKey   = columnText(stmt, 0);
-        game.title     = columnText(stmt, 1);
-        game.year      = sqlite3_column_int(stmt, 2);
-        game.rating    = sqlite3_column_int(stmt, 3);
-        game.searchKey = columnText(stmt, 4);
-        game.coverRef  = columnText(stmt, 5);
-        games.append(game);
-    }
+    while (sqlite3_step(stmt) == SQLITE_ROW)
+        games.append(readGame(stmt));
     sqlite3_finalize(stmt);
     return games;
 }
@@ -303,24 +347,16 @@ std::optional<Game> ExportDatabase::gameByKey(const QString &gameKey) const
     if (!m_db)
         return std::nullopt;
 
-    sqlite3_stmt *stmt = prepare(m_db, QStringLiteral("SELECT game_key, title, year, "
-                                                      "rating, search_key, cover_ref "
-                                                      "FROM exp_game WHERE game_key = ?"));
+    sqlite3_stmt *stmt =
+        prepare(m_db,
+                QStringLiteral("SELECT %1 FROM exp_game WHERE game_key = ?").arg(gameColumns()));
     if (!stmt)
         return std::nullopt;
     bindText(stmt, 1, gameKey);
 
     std::optional<Game> result;
-    if (sqlite3_step(stmt) == SQLITE_ROW) {
-        Game game;
-        game.gameKey   = columnText(stmt, 0);
-        game.title     = columnText(stmt, 1);
-        game.year      = sqlite3_column_int(stmt, 2);
-        game.rating    = sqlite3_column_int(stmt, 3);
-        game.searchKey = columnText(stmt, 4);
-        game.coverRef  = columnText(stmt, 5);
-        result         = game;
-    }
+    if (sqlite3_step(stmt) == SQLITE_ROW)
+        result = readGame(stmt);
     sqlite3_finalize(stmt);
     return result;
 }
@@ -332,10 +368,11 @@ QList<GamePlatform> ExportDatabase::platformsForGame(const QString &gameKey) con
         return platforms;
 
     const QString sql = QStringLiteral(
-                            "SELECT display_name, %1, emu_score, is_preferred "
+                            "SELECT display_name, %1, emu_score, is_preferred, %2 "
                             "FROM exp_game_platform WHERE game_key = ? "
                             "ORDER BY is_preferred DESC, emu_score DESC")
-                            .arg(platformColumn());
+                            .arg(platformColumn(),
+                                 columnOrNull(m_hasReleaseYear, QStringLiteral("release_year")));
 
     sqlite3_stmt *stmt = prepare(m_db, sql);
     if (!stmt)
@@ -349,6 +386,7 @@ QList<GamePlatform> ExportDatabase::platformsForGame(const QString &gameKey) con
         platform.platformKey = columnText(stmt, 1); // NULL possible : plateforme non émulée
         platform.emuScore    = sqlite3_column_int(stmt, 2);
         platform.isPreferred = sqlite3_column_int(stmt, 3) != 0;
+        platform.releaseYear = sqlite3_column_int(stmt, 4); // 0 si NULL ou colonne absente
         platforms.append(platform);
     }
     sqlite3_finalize(stmt);
@@ -461,6 +499,25 @@ QList<RomHash> ExportDatabase::romHashesForGame(const QString &gameKey) const
     }
     sqlite3_finalize(stmt);
     return hashes;
+}
+
+bool ExportDatabase::hasColumn(const QString &table, const QString &column) const
+{
+    if (!m_db)
+        return false;
+
+    // pragma_table_info ne prend pas de paramètre lié pour le nom de table : il est
+    // interpolé, et ne vient que de constantes de ce fichier — jamais d'une saisie.
+    return scalar(m_db,
+                  QStringLiteral("SELECT COUNT(*) FROM pragma_table_info('%1') WHERE name = ?")
+                      .arg(table),
+                  column)
+           == 1;
+}
+
+QString ExportDatabase::columnOrNull(bool present, const QString &column) const
+{
+    return present ? column : QStringLiteral("NULL");
 }
 
 bool ExportDatabase::detectLanguageTables() const
@@ -606,6 +663,32 @@ QList<GameLanguage> ExportDatabase::languagesForGame(const QString &gameKey) con
     sqlite3_finalize(stmt);
     return languages;
 }
+
+QList<GameMode> ExportDatabase::gameModes() const
+{
+    QList<GameMode> modes;
+    if (!m_db || !m_hasModes)
+        return modes;
+
+    sqlite3_stmt *stmt =
+        prepare(m_db, QStringLiteral("SELECT mode_key, label, bit_index FROM exp_game_mode "
+                                     "ORDER BY bit_index IS NULL, bit_index, mode_key"));
+    if (!stmt)
+        return modes;
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        GameMode mode;
+        mode.key   = columnText(stmt, 0);
+        mode.label = columnText(stmt, 1);
+        // Même convention que pour les langues : NULL est l'ABSENCE de bit, pas le bit 0.
+        mode.bitIndex =
+            sqlite3_column_type(stmt, 2) == SQLITE_NULL ? -1 : sqlite3_column_int(stmt, 2);
+        modes.append(mode);
+    }
+    sqlite3_finalize(stmt);
+    return modes;
+}
+
 
 QList<Romset> ExportDatabase::romsetsForGame(const QString &gameKey) const
 {

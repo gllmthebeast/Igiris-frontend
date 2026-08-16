@@ -4,7 +4,7 @@
 > **Frontend embarqué** (Batocera / Raspberry Pi en premier, mais pas uniquement — §1).
 > Le backend est un projet **SÉPARÉ** : `/opt/igiris` sur cette même VM, avec son propre
 > `CLAUDE.md`. Ce projet ne démarre vraiment qu'une fois l'export générable de bout en bout
-> — ce qui est le cas aujourd'hui (schéma **1.4.0**, cf. `data/`).
+> — ce qui est le cas aujourd'hui (schéma **1.6.0**, cf. `data/`).
 
 ---
 
@@ -140,9 +140,9 @@ l'ancien. Un export tronqué ne doit jamais devenir l'export courant.
 
 ---
 
-## 3. Le schéma **réellement livré** — version 1.4.0
+## 3. Le schéma **réellement livré** — version 1.6.0
 
-⚠️ Ceci est le schéma vérifié dans `data/games.db` au 2026-08-10. Pour ce qui est *demandé*
+⚠️ Ceci est le schéma vérifié dans `data/games.db` au 2026-08-16. Pour ce qui est *demandé*
 au backend mais **pas encore livré** (`platform_key`), voir §9 — et ne pas coder contre ces
 champs avant qu'ils existent.
 
@@ -152,17 +152,24 @@ exp_meta(key, value)
     -- valeurs actuelles : 7 581 jeux · 18 555 plateformes · 71 006 hashes
     --                     2 697 romsets arcade · 96 dats · 63 systèmes distincts
 
-exp_game(game_key, title, search_key, year, cover_ref, rating)
+exp_game(game_key, title, search_key, year, cover_ref, artwork_ref, rating,
+         summary, mode_mask, lang_mask)
     -- game_key : identifiant stable, = title.id côté serveur (« igdb-3192 »)
     -- search_key : nom NORMALISÉ, à utiliser pour la recherche locale (jamais à afficher)
     -- cover_ref : URL IGDB — voir la limite « hors ligne » en §10
     -- rating : note IGDB /100
+    -- ⚠ lang_mask EST ET RESTE LE DERNIER CHAMP : c'est l'invariant que le backend s'est
+    --   donné après avoir décalé un indice positionnel en insérant artwork_ref au milieu.
+    --   Ce chargeur lit par NOM et pas par position, donc il y survit — mais l'ordre
+    --   ci-dessus est celui du fichier, pas une convention d'écriture.
 
-exp_game_platform(game_key, batocera_system, display_name, emu_score, is_preferred)
+exp_game_platform(game_key, batocera_system, display_name, emu_score, is_preferred,
+                  release_year)
     -- PRIMARY KEY (game_key, display_name)
     -- batocera_system : NULL = plateforme d'origine non émulée (pas une cible)
     -- emu_score : fidélité 0..100 (voir §5)
-    -- is_preferred : plateforme élue par les votes de la communauté
+    -- is_preferred : plateforme élue par les votes. CORRIGÉ en 1.4.0 : 31 lignes sur
+    --   18 555, sans jeu à double élection. Il ne marque plus « jamais comparé ».
 
 exp_rom_hash(crc32, batocera_system, game_key, header_skip)
     -- PRIMARY KEY (crc32, batocera_system) — LA table interrogée à chaud.
@@ -188,6 +195,36 @@ exp_game_language(game_key, lang_code, batocera_system, crc32)
 
 exp_game.lang_mask
     -- masque de bits des langues au catalogue. 5 986 jeux sur 7 581 (79 %).
+
+-- --------------------------------------------------- ajouts du 1.5.0 : visuels et dates
+
+exp_game.artwork_ref
+    -- ILLUSTRATION de bandeau : horizontale, composée, SANS texte de pochette. Ce n'est
+    -- PAS une jaquette en plus grand — une jaquette est verticale et porte logo, mentions
+    -- et code-barres, qui se retrouvaient tronqués en travers du bandeau de la fiche.
+    -- 7 247 jeux sur 7 581 (95,6 %). Vide → la fiche retombe sur cover_ref, en le sachant.
+
+exp_game_platform.release_year
+    -- Année de sortie SUR CETTE PLATEFORME, et non celle du jeu. 18 555 / 18 555.
+    -- Pas un doublon de exp_game.year : 7 711 lignes (42 %) en diffèrent. C'est ce qui
+    -- permet à la fiche de dater chaque système qu'elle aligne côte à côte.
+
+-- ------------------------------------------------- ajouts du 1.6.0 : ce qui raconte le jeu
+
+exp_game.summary
+    -- Synopsis IGDB. 7 562 / 7 581 (99,7 %). ⚠ TOUJOURS EN ANGLAIS, y compris sur une
+    -- interface française : IGDB n'en fournit pas de traduit. Pas de colonne summary_lang,
+    -- elle porterait 'en' sur 100 % des lignes — la règle est ici, et c'est voulu.
+
+exp_game.mode_mask + exp_game_mode(mode_key, label, bit_index)
+    -- Modes de jeu, MÊME PATRON qu'exp_language : bit_index à vie, filtrage par ET
+    -- binaire. 7 359 jeux (97,1 %) · 6 modes au référentiel, livré ENTIER (le menu de
+    -- filtres ne dépend donc pas du contenu du catalogue).
+    --
+    -- C'est la réponse au « nombre de joueurs » demandé, PAS ce qui avait été demandé :
+    -- le format « 1-4 » n'existe chez IGDB que pour 12 % du catalogue rétro, quand les
+    -- modes en couvrent 97 %. On perd d'afficher « 1-4 », on gagne le filtre
+    -- « jouable à plusieurs » — 3 333 jeux au lieu de ~900.
 ```
 
 > **Ce que l'export ne dit pas, et ne dira pas.** Le backend a tranché : aucune langue
@@ -309,6 +346,7 @@ fiche de jeu (§7). La liste reste dense et lisible à distance, sur un écran d
 | Plateforme | statique | index de l'export |
 | Possédé / manquant | dynamique | index local |
 | Année, arcade | statique | index de l'export |
+| Mode de jeu — solo, multi, coop… | statique | index de l'export (1.6.0) |
 
 La distinction statique / dynamique n'est pas cosmétique : un filtre **statique** est un
 index précalculé par igiris, un filtre **dynamique** impose un croisement avec le résultat
@@ -538,10 +576,16 @@ C'est tout. **Déterministe, rapide, hors ligne.**
 
 ## 11. Limites connues, à ne pas découvrir en route
 
-- **Les jaquettes sont des URL IGDB** (`cover_ref`), donc **le réseau est nécessaire pour
-  les images**. C'est la seule entorse au « hors ligne ». Pour un vrai fonctionnement
-  déconnecté, il faudra un **pack d'images** — le backend peut le produire, c'est à
-  demander (§9).
+- **Les images sont des URL IGDB** (`cover_ref` pour la jaquette, `artwork_ref` pour le
+  bandeau), donc **le réseau est nécessaire pour les afficher**. C'est la seule entorse au
+  « hors ligne », et elle reste entière. Pour un vrai fonctionnement déconnecté il faudra un
+  **pack d'images** : demandé, chiffré (27 Mo en vignettes 90×120), et **en attente d'une
+  décision qui n'est pas technique** — redistribuer des jaquettes IGDB depuis notre propre
+  hébergement nous fait passer d'afficheur d'URL à distributeur. Tant que ce point n'est pas
+  tranché, la limite est assumée et documentée des deux côtés.
+- **Le synopsis est en anglais**, sur une interface française. IGDB n'en fournit pas de
+  traduit ; le backend l'a vérifié plutôt que supposé. Mieux vaut le texte réel que rien,
+  mais la fiche ne le présente pas comme localisé.
 - **~17 % des jeux éligibles ne sont pas encore rattachés à un dump.** Le contenu s'enrichit
   à chaque passage mensuel ; **la structure, elle, ne bouge pas**.
 - **Les CRC ambigus sont volontairement absents.** Un même CRC peut désigner plusieurs jeux
