@@ -13,6 +13,11 @@ FocusScope {
     property color selection: "#2d4f7c"
     property color textColor: "#e8e8ef"
     property color dimColor: "#8a8a9a"
+    // Liseré porté par TOUS les textes de la fiche depuis que le visuel occupe le
+    // fond : sans lui, une phrase qui traverse une zone claire de l'illustration
+    // devient illisible. C'est le rendu de texte de Qt qui le dessine, sans effet
+    // graphique ni seconde passe — le §12 rappelle que le GPU cible est faible.
+    property color outlineColor: "#0a0a0e"
 
     signal closed()
 
@@ -30,49 +35,61 @@ FocusScope {
     // au défilement.
     readonly property var statusColors: ["#3a3a44", "#b03b3b", "#3f9d4f"] // noir, rouge, vert
 
-    // ------------------------------------------------------------------ bandeau
+    // ------------------------------------------------------------------ visuel de fond
     //
-    // Un BANDEAU, pas un fond de page : une bande en haut de la fiche, qui se fond dans
-    // l'arrière-plan et sous laquelle la liste des systèmes reste sur un fond neutre. Un
-    // visuel qui court derrière du texte dense le rend illisible à trois mètres (§6).
+    // L'illustration occupe TOUTE la fiche, et non plus une bande en haut : c'est une image
+    // composée, la réduire à un bandeau en jetait l'essentiel.
     //
-    // Depuis l'export 1.5.0, c'est une VRAIE illustration (artwork_ref) sur 95,6 % des
-    // fiches : horizontale, composée, sans texte de pochette. Pour les 4,4 % restants on
-    // retombe sur la jaquette recadrée, et le rendu s'adoucit alors au lieu de prétendre —
-    // c'est tout ce que `detail.hasRealBanner` change ici.
+    // Elle court donc derrière du texte dense, ce que le §6 met en garde de faire. TROIS
+    // choses le rendent tenable, et il faut les garder ensemble :
+    //   - l'opacité, qui fait le mélange avec le fond sombre de la fiche ;
+    //   - le voile ci-dessous, qui rattrape le contraste là où le texte est le plus dense ;
+    //   - le liseré porté par chaque texte, qui le détache d'une zone claire de l'image.
+    // Monter l'opacité sans ces deux-là rendrait la liste des systèmes illisible à trois
+    // mètres — et c'est cette liste qu'on vient lire.
+    Image {
+        id: bannerImage
+
+        anchors.fill: parent
+        source: games.coversEnabled ? detail.bannerRef : ""
+        // Recadrée pour REMPLIR la fiche, sans bande vide.
+        //
+        // Montrer l'image entière était l'autre option ; elle a été essayée et écartée sur
+        // mesure. Les illustrations d'IGDB n'ont pas de format commun — relevé sur les 12
+        // premières du catalogue : de 3,1 (1920×620) à 0,82 (891×1080), et DEUX seulement
+        // en 16:9. Les afficher entières laisserait donc des bandes vides sur la majorité
+        // des fiches, avec une arête franche à la limite de l'image. Le recadrage perd des
+        // bords ; l'ajustement perdait le fond de page.
+        fillMode: Image.PreserveAspectCrop
+        asynchronous: true
+        cache: true
+        // Décodage borné à la largeur réellement affichée : sans cela Qt garderait un
+        // second décodage pleine taille de l'image déjà affichée en vignette.
+        sourceSize.width: 1280
+        // Franche pour une vraie illustration, discrète quand ce n'est qu'une jaquette
+        // étirée : la fiche ne prétend pas montrer ce qu'elle n'a pas.
+        opacity: status === Image.Ready ? (detail.hasRealBanner ? 0.65 : 0.32) : 0
+        Behavior on opacity { NumberAnimation { duration: 200 } }
+    }
+
+    // Voile de lisibilité. Léger en haut, où il n'y a que le titre sur deux lignes ; plus
+    // soutenu vers le bas, où s'empilent les systèmes, leurs badges et la légende.
+    Rectangle {
+        anchors.fill: parent
+        gradient: Gradient {
+            GradientStop { position: 0.00; color: Qt.rgba(0.06, 0.06, 0.08, 0.30) }
+            GradientStop { position: 0.28; color: Qt.rgba(0.06, 0.06, 0.08, 0.45) }
+            GradientStop { position: 1.00; color: Qt.rgba(0.06, 0.06, 0.08, 0.78) }
+        }
+    }
+
+    // Repère de mise en page de l'en-tête — jaquette, titre, métadonnées. Purement
+    // géométrique : il ne dessine rien depuis que le visuel occupe toute la fiche.
     Item {
         id: banner
 
         anchors { top: parent.top; left: parent.left; right: parent.right }
         height: 208
-        clip: true
-
-        Image {
-            id: bannerImage
-            anchors.fill: parent
-            source: games.coversEnabled ? detail.bannerRef : ""
-            fillMode: Image.PreserveAspectCrop
-            asynchronous: true
-            cache: true
-            // Décodage borné : sans cela, Qt garderait un second décodage pleine taille de
-            // la même image déjà affichée en vignette.
-            sourceSize.width: 720
-            // Discret tant que ce n'est qu'une jaquette étirée ; franc quand ce sera une
-            // vraie illustration.
-            opacity: status === Image.Ready ? (detail.hasRealBanner ? 0.55 : 0.22) : 0
-            Behavior on opacity { NumberAnimation { duration: 200 } }
-        }
-
-        // Fondu vers le fond de la fiche : le bandeau ne doit pas se terminer par une
-        // arête nette, et le texte posé dessus doit garder son contraste.
-        Rectangle {
-            anchors.fill: parent
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: Qt.rgba(0.06, 0.06, 0.08, 0.60) }
-                GradientStop { position: 0.55; color: Qt.rgba(0.06, 0.06, 0.08, 0.80) }
-                GradientStop { position: 1.0; color: sheet.background }
-            }
-        }
     }
 
     // §7 : « Jaquette, métadonnées, et la liste des systèmes ».
@@ -92,6 +109,7 @@ FocusScope {
                   right: parent.right; rightMargin: 32 }
         text: detail.title
         color: sheet.textColor
+        style: Text.Outline; styleColor: sheet.outlineColor
         font.pixelSize: 32
         elide: Text.ElideRight
     }
@@ -106,6 +124,7 @@ FocusScope {
             visible: detail.year > 0
             text: detail.year
             color: sheet.dimColor
+            style: Text.Outline; styleColor: sheet.outlineColor
             font.pixelSize: 17
         }
 
@@ -115,6 +134,7 @@ FocusScope {
             // qui mesure la fidélité d'ÉMULATION et non la qualité du jeu.
             text: qsTr("note %1 / 100").arg(detail.rating)
             color: sheet.dimColor
+            style: Text.Outline; styleColor: sheet.outlineColor
             font.pixelSize: 17
         }
 
@@ -125,6 +145,7 @@ FocusScope {
             visible: detail.modeLabels.length > 0
             text: detail.modeLabels.join("  ·  ")
             color: sheet.dimColor
+            style: Text.Outline; styleColor: sheet.outlineColor
             font.pixelSize: 17
         }
     }
@@ -148,6 +169,7 @@ FocusScope {
         // trois lignes, pas un texte à lire.
         text: detail.summary.replace(/\s+/g, " ").trim()
         color: sheet.dimColor
+        style: Text.Outline; styleColor: sheet.outlineColor
         font.pixelSize: 16
         lineHeight: 1.25
         wrapMode: Text.WordWrap
@@ -163,6 +185,7 @@ FocusScope {
         // Une capacité non déclarée se DIT, elle ne se devine pas (§1).
         text: detail.launchWarning
         color: "#d8a657"
+        style: Text.Outline; styleColor: sheet.outlineColor
         font.pixelSize: 16
         wrapMode: Text.WordWrap
     }
@@ -227,6 +250,7 @@ FocusScope {
                           + (platformRow.releaseYear > 0
                              ? "  ·  " + platformRow.releaseYear : "")
                     color: sheet.textColor
+                    style: Text.Outline; styleColor: sheet.outlineColor
                     font.pixelSize: 20
                 }
 
@@ -274,6 +298,7 @@ FocusScope {
                 visible: parent.isDefaultChoice
                 text: qsTr("proposé par défaut")
                 color: sheet.dimColor
+                style: Text.Outline; styleColor: sheet.outlineColor
                 font.pixelSize: 16
             }
 
@@ -283,6 +308,7 @@ FocusScope {
                 // emu_score est une note d'ÉMULATION, pas de qualité du jeu (§5).
                 text: qsTr("émulation %1").arg(parent.emuScore)
                 color: sheet.dimColor
+                style: Text.Outline; styleColor: sheet.outlineColor
                 font.pixelSize: 16
             }
         }
@@ -339,6 +365,7 @@ FocusScope {
                     anchors.verticalCenter: parent.verticalCenter
                     text: parent.modelData.t
                     color: sheet.dimColor
+                    style: Text.Outline; styleColor: sheet.outlineColor
                     font.pixelSize: 15
                 }
             }
