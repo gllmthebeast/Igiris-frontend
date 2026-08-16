@@ -58,6 +58,19 @@ class GameDetailModel : public QAbstractListModel
     // Modes de jeu du titre, libellés déjà traduits par l'export : [« Un joueur »,
     // « Coopératif »…]. Vide quand l'export n'en porte pas.
     Q_PROPERTY(QStringList modeLabels READ modeLabels NOTIFY gameChanged)
+    // Langues connues du CATALOGUE seul (export 1.7.0), et qu'aucune ROM ne fournit.
+    //
+    // Volontairement SÉPARÉES des badges par plateforme : celles-ci se rangent sur l'axe
+    // illuminé / grisé, qui promet qu'un téléchargement peut allumer le badge. Une langue
+    // de catalogue ne le peut pas — IGDB ne connaît ni release ni CRC. Les mêler ferait de
+    // la moitié des badges des promesses invérifiables.
+    Q_PROPERTY(QStringList catalogLanguages READ catalogLanguages NOTIFY gameChanged)
+    // Plateformes du catalogue qu'on ne sait PAS émuler — PC, PS4, Switch… Vide avant
+    // l'export 1.7.0, où elles n'existaient tout simplement pas.
+    //
+    // La fiche s'en sert pour expliquer une liste de systèmes vide : 9 679 jeux sur 17 260
+    // sont dans ce cas, et une zone vide sans un mot se lit comme une panne.
+    Q_PROPERTY(QStringList nonEmulablePlatforms READ nonEmulablePlatforms NOTIFY gameChanged)
     Q_PROPERTY(bool launchAvailable READ launchAvailable NOTIFY capabilitiesChanged)
     Q_PROPERTY(QString launchWarning READ launchWarning NOTIFY capabilitiesChanged)
 
@@ -141,6 +154,8 @@ public:
     bool    hasRealBanner() const { return !m_artworkRef.isEmpty(); }
     QString     summary() const { return m_summary; }
     QStringList modeLabels() const { return m_modeLabels; }
+    QStringList catalogLanguages() const { return m_catalogLanguages; }
+    QStringList nonEmulablePlatforms() const { return m_nonEmulablePlatforms; }
 
     bool    launchAvailable() const;
     QString launchWarning() const;
@@ -187,6 +202,8 @@ private:
     QString     m_artworkRef;
     QString     m_summary;
     QStringList m_modeLabels;
+    QStringList m_catalogLanguages;
+    QStringList m_nonEmulablePlatforms;
     QList<Row>  m_rows;
 };
 

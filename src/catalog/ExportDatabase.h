@@ -82,6 +82,24 @@ struct Game {
     // couvrait qu'à 12 % : le nombre exact de joueurs n'est pas atteignable, le filtre
     // « jouable à plusieurs » l'est à 97 %.
     quint64 modeMask = 0;
+
+    // LANGUES DU CATALOGUE (1.7.0), d'après IGDB — audio et sous-titres seulement.
+    //
+    // ⚠️ NE JAMAIS FUSIONNER AVEC lang_mask. Les deux masques emploient le MÊME registre
+    // de bits, ce qui rend la confusion facile et silencieuse, mais ils ne disent pas la
+    // même chose :
+    //
+    //   lang_mask        « une ROM du catalogue fournit cette langue » → peut s'illuminer
+    //   langCatalogMask  « le jeu EXISTE dans cette langue »           → ne le peut JAMAIS
+    //
+    // IGDB ne connaît ni release ni CRC : il n'existe aucun hash auquel rattacher une
+    // langue venue de là. L'ajouter au masque qui pilote les badges produirait des badges
+    // définitivement gris, que l'utilisateur ne pourrait allumer quoi qu'il télécharge —
+    // alors que le §8 promet deux états et pas trois.
+    //
+    // Sert donc le filtre statique « existe en <langue> », et rien d'autre en vue liste.
+    // 8 121 jeux sur 17 260 (47 %), dont 6 879 où les dats sont muets.
+    quint64 langCatalogMask = 0;
 };
 
 // Une plateforme sur laquelle le jeu existe. `platformKey` est vide quand l'export ne
@@ -90,8 +108,16 @@ struct Game {
 struct GamePlatform {
     QString platformKey;
     QString displayName;
-    int     emuScore    = 0;
+    // Fidélité d'émulation 0..100 (§5), ou -1 quand l'export n'en donne pas.
+    //
+    // -1 et non 0 : depuis le 1.7.0 le catalogue porte des plateformes NON ÉMULABLES —
+    // PC, PS4, Switch — sur lesquelles emu_score vaut NULL, parce qu'un taux de fidélité
+    // d'émulation n'y a aucun sens. « 0 » s'y lirait « émulation catastrophique », ce qui
+    // est faux et pire qu'une absence. 40 511 lignes sur 59 066 sont dans ce cas.
+    int     emuScore    = -1;
     bool    isPreferred = false;
+
+    bool hasEmuScore() const { return emuScore >= 0; }
 
     // Année de sortie SUR CETTE PLATEFORME (export 1.5.0), et non celle du jeu. 0 quand
     // l'export ne la porte pas.
@@ -266,6 +292,10 @@ public:
     // numéro de mineure.
     bool hasModes() const { return m_hasModes; }
 
+    // Vrai à partir de l'export 1.7.0. L'interface s'en sert pour dire à l'utilisateur que
+    // le filtre « existe en <langue> » couvre le catalogue et pas seulement les ROMs.
+    bool hasCatalogLanguages() const { return m_hasCatalogLanguages; }
+
     // Le référentiel complet, ordonné par bit_index. Le backend le livre ENTIER et non
     // limité aux modes observés : le menu de filtres se construit donc sans dépendre du
     // contenu du catalogue.
@@ -311,6 +341,7 @@ private:
     bool       m_hasSummary   = false;
     bool       m_hasReleaseYear = false;
     bool       m_hasModes       = false;
+    bool       m_hasCatalogLanguages = false;
 };
 
 } // namespace igiris::catalog

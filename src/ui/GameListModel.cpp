@@ -326,7 +326,16 @@ bool GameListModel::matches(const Entry &entry) const
         if (m_languageOwnedOnly && !m_ownedLanguagesAvailable)
             return true;
 
-        const quint64 available = m_languageOwnedOnly ? entry.ownedLangMask : entry.langMask;
+        // Les DEUX sources se cumulent pour « existe », et une seule pour « jouable ».
+        //
+        // C'est la distinction que l'export 1.7.0 rend nécessaire : les dats disent quelle
+        // ROM fournit quelle langue, IGDB dit seulement dans quelles langues le jeu existe.
+        // La seconde source ne peut rien illuminer — aucun CRC ne s'y rattache — mais elle
+        // répond parfaitement à « existe en français », et elle double la couverture du
+        // filtre. Les mélanger dans l'autre sens produirait des badges ineffaçables.
+        const quint64 available = m_languageOwnedOnly
+                                      ? entry.ownedLangMask
+                                      : (entry.langMask | entry.game.langCatalogMask);
         // ET binaire, et TOUTES les langues exigées : c'est le §8, et c'est aussi ce qui
         // rend la combinaison multi-langues gratuite.
         if ((available & m_requiredLangMask) != m_requiredLangMask)

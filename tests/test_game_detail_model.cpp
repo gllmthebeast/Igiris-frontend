@@ -147,6 +147,10 @@ private slots:
     void banner_fallsBackToTheCoverAndSaysSo();
     void banner_usesTheArtworkWhenTheExportHasOne();
     void releaseYear_isExposedPerPlatformRow();
+
+    // --- export 1.7.0 : catalogue élargi ---
+    void catalogLanguages_excludeThoseAlreadyProvidedByARom();
+    void nonEmulablePlatforms_areKeptToExplainAnEmptyList();
 };
 
 // Ajoute les colonnes des 1.5.0 / 1.6.0 à l'export de test. `artwork` vide simule les
@@ -188,6 +192,83 @@ bool addFiches(const QString &path, const QString &artwork)
     return ok;
 }
 } // namespace
+
+void TestGameDetailModel::catalogLanguages_excludeThoseAlreadyProvidedByARom()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath("games.db");
+    QVERIFY(buildExport(path));
+    QVERIFY(addLanguages(path));
+
+    // en(0) et de(3) au catalogue. « en » est DÉJÀ fourni par une ROM sur snes ; « de »
+    // ne l'est par aucune. Seul « de » doit ressortir : afficher « en » ici le dédoublerait
+    // avec son badge de plateforme, et brouillerait ce que la ligne veut dire.
+    //
+    // « de » est ajouté au référentiel ICI et non dans la fixture partagée : c'est une
+    // langue qu'AUCUNE ROM ne fournit, ce qui n'a de sens que pour ce test.
+    sqlite3 *raw = nullptr;
+    QVERIFY(sqlite3_open(path.toUtf8().constData(), &raw) == SQLITE_OK);
+    QVERIFY(sqlite3_exec(raw,
+                         "INSERT INTO exp_language VALUES('de','Allemand',NULL,3);"
+                         "ALTER TABLE exp_game ADD COLUMN lang_catalog_mask INTEGER;"
+                         "UPDATE exp_game SET lang_catalog_mask = 9;",
+                         nullptr, nullptr, nullptr)
+            == SQLITE_OK);
+    sqlite3_close(raw);
+
+    ExportDatabase db;
+    QVERIFY(db.open(path, nullptr));
+    QVERIFY(db.hasCatalogLanguages());
+
+    GameDetailModel model;
+    model.setCatalogue(&db);
+    model.setLanguages(db.languages());
+    model.setGame(QStringLiteral("igdb-1"));
+
+    QCOMPARE(model.catalogLanguages(), QStringList({ QStringLiteral("de") }));
+
+    // Et les badges de plateforme, eux, n'ont pas bougé d'un pouce : la langue de
+    // catalogue ne doit RIEN ajouter à l'axe illuminé / grisé.
+    bool sawEnglish = false;
+    for (int row = 0; row < model.rowCount(); ++row) {
+        const auto badges = model.data(model.index(row, 0),
+                                       GameDetailModel::LanguagesRole).toList();
+        for (const auto &badge : badges) {
+            const auto map = badge.toMap();
+            QVERIFY(map.value(QStringLiteral("code")).toString() != QStringLiteral("de"));
+            if (map.value(QStringLiteral("code")).toString() == QStringLiteral("en"))
+                sawEnglish = true;
+        }
+    }
+    QVERIFY(sawEnglish);
+}
+
+void TestGameDetailModel::nonEmulablePlatforms_areKeptToExplainAnEmptyList()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath("games.db");
+    QVERIFY(buildExport(path));
+
+    ExportDatabase db;
+    QVERIFY(db.open(path, nullptr));
+
+    GameDetailModel model;
+    model.setCatalogue(&db);
+    model.setGame(QStringLiteral("igdb-1"));
+
+    // La plateforme non émulable reste HORS de la liste des systèmes — celle-ci ne parle
+    // que de lançable — mais elle est conservée à part.
+    for (int row = 0; row < model.rowCount(); ++row) {
+        QVERIFY(!model.data(model.index(row, 0),
+                            GameDetailModel::PlatformKeyRole).toString().isEmpty());
+    }
+    QCOMPARE(model.nonEmulablePlatforms(),
+             QStringList({ QStringLiteral("Plateforme non émulée") }));
+
+    // Sans elle, la fiche des 9 679 jeux qui n'ont QUE des plateformes non émulables
+    // n'aurait rien à afficher ni rien à expliquer — un blanc qui se lit comme une panne.
+    QVERIFY(!model.nonEmulablePlatforms().isEmpty());
+}
 
 void TestGameDetailModel::banner_fallsBackToTheCoverAndSaysSo()
 {

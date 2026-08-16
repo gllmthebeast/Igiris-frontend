@@ -94,9 +94,14 @@ void GameDetailModel::setGame(const QString &gameKey)
     m_artworkRef.clear();
     m_summary.clear();
     m_modeLabels.clear();
+    m_catalogLanguages.clear();
+    m_nonEmulablePlatforms.clear();
+
+    quint64 catalogMask = 0;
 
     if (m_db && !gameKey.isEmpty()) {
         if (const auto game = m_db->gameByKey(gameKey)) {
+            catalogMask = game->langCatalogMask;
             m_title      = game->title;
             m_rating     = game->rating;
             m_year       = game->year;
@@ -126,6 +131,25 @@ void GameDetailModel::setGame(const QString &gameKey)
             state       = state || owned;
         }
 
+        // Les langues que SEUL le catalogue connaît (export 1.7.0).
+        //
+        // On retire celles qu'une ROM fournit déjà : elles ont leur badge sur la ligne de
+        // leur plateforme, avec l'état illuminé / grisé qui va avec. Ne restent ici que
+        // celles qu'aucun CRC ne porte — donc celles qu'aucun téléchargement n'allumera.
+        // Les afficher à part est la seule façon de les montrer sans promettre ça.
+        QSet<QString> providedByRoms;
+        for (const auto &byPlatform : languagesByPlatform) {
+            for (auto it = byPlatform.cbegin(); it != byPlatform.cend(); ++it)
+                providedByRoms.insert(it.key());
+        }
+        for (const auto &language : m_languages) {
+            if (!language.hasBit() || !(catalogMask & language.bit()))
+                continue;
+            if (providedByRoms.contains(language.code))
+                continue;
+            m_catalogLanguages.append(language.code);
+        }
+
         // Les informations d'arcade, par plateforme. Elles existent dans l'export depuis le
         // début (§4) et n'étaient affichées nulle part : le matériel réel, les émulateurs
         // capables de lancer le romset, et l'état du pilote.
@@ -136,8 +160,17 @@ void GameDetailModel::setGame(const QString &gameKey)
         QSet<QString> seen; // exp_game_platform a pour clé (game_key, display_name)
 
         for (const auto &platform : m_db->platformsForGame(gameKey)) {
-            if (!platform.isEmulationTarget())
-                continue; // plateforme d'origine non émulée : ni verte, ni rouge, ni noire
+            if (!platform.isEmulationTarget()) {
+                // Plateforme d'origine non émulée : ni verte, ni rouge, ni noire — elle
+                // n'entre pas dans la liste des systèmes, qui ne parle que de lançable.
+                //
+                // On la GARDE de côté malgré tout. Depuis le 1.7.0 elles sont 40 511, et
+                // 9 679 jeux n'ont QUE celles-là : sans elles, leur fiche montrerait une
+                // zone vide sans un mot d'explication.
+                if (!m_nonEmulablePlatforms.contains(platform.displayName))
+                    m_nonEmulablePlatforms.append(platform.displayName);
+                continue;
+            }
             if (seen.contains(platform.platformKey))
                 continue;
             seen.insert(platform.platformKey);

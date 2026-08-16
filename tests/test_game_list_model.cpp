@@ -138,6 +138,10 @@ private slots:
     void modeFilter_keepsOnlyGamesCarryingThatBit();
     void modeFilter_multipleModesRequireThemAll();
     void modeFilter_isClearedByClearFilters();
+
+    // --- export 1.7.0 : langues de catalogue ---
+    void catalogLanguages_widenExistsButNeverPlayable();
+    void catalogLanguages_doNotLightUpBadges();
 };
 
 void TestGameListModel::languages_areUnavailableOnAnExportWithoutThem()
@@ -659,6 +663,71 @@ void TestGameListModel::modeFilter_isClearedByClearFilters()
     model.clearFilters();
     QCOMPARE(model.rowCount(), 3);
     QVERIFY(model.modeFilter().isEmpty());
+}
+
+// Catalogue où lang_catalog_mask apporte ce que les dats ignorent.
+//
+//   igdb-1  ROM : ja(5)          catalogue : —
+//   igdb-2  ROM : en,fr,de,ja    catalogue : —
+//   igdb-3  ROM : —              catalogue : fr(1)   ← le cas des 6 879 jeux de production
+void feedCatalogLanguages(GameListModel &model)
+{
+    auto games = sampleGames();
+    games[2].langCatalogMask = 0b000010; // fr, connu du seul catalogue
+
+    const QHash<QString, QStringList> platforms = {
+        { QStringLiteral("igdb-1"), { QStringLiteral("gb") } },
+        { QStringLiteral("igdb-2"), { QStringLiteral("nes") } },
+        { QStringLiteral("igdb-3"), { QStringLiteral("snes") } },
+    };
+    model.setCatalogue(games, platforms, {});
+    model.setLanguages(sampleLanguages(),
+                       { { QStringLiteral("igdb-1"), 0b100000 },
+                         { QStringLiteral("igdb-2"), 0b101011 } });
+}
+
+void TestGameListModel::catalogLanguages_widenExistsButNeverPlayable()
+{
+    GameListModel model;
+    feedCatalogLanguages(model);
+
+    // « EXISTE en français » : igdb-2 par ses ROMs, igdb-3 par le seul catalogue. Sans la
+    // seconde source, igdb-3 serait invisible alors que le jeu existe bien en français —
+    // c'est exactement la moitié du catalogue de production qui serait perdue.
+    model.setLanguageFilter({ QStringLiteral("fr") });
+    QCOMPARE(model.rowCount(), 2);
+
+    // « JOUABLE en français » : rien ne change pour igdb-3, et c'est le point. IGDB ne
+    // connaît ni release ni CRC ; aucune ROM ne peut donc rendre ce jeu jouable en
+    // français, et le prétendre serait un mensonge invérifiable par l'utilisateur.
+    model.setOwnedLanguageMasks({ { QStringLiteral("igdb-2"), 0b000010 } });
+    model.setLanguageOwnedOnly(true);
+    QCOMPARE(model.rowCount(), 1);
+    QCOMPARE(model.data(model.index(0, 0), GameListModel::TitleRole).toString(),
+             QStringLiteral("The Legend of Zelda"));
+
+    // Et le retour à « existe » réélargit : les deux filtres restent bien distincts.
+    model.setLanguageOwnedOnly(false);
+    QCOMPARE(model.rowCount(), 2);
+}
+
+void TestGameListModel::catalogLanguages_doNotLightUpBadges()
+{
+    GameListModel model;
+    feedCatalogLanguages(model);
+
+    // igdb-3 passe le filtre « existe en français », mais n'affiche AUCUN badge : un badge
+    // gris qu'aucun téléchargement ne peut allumer serait un troisième état déguisé, et le
+    // §8 n'en promet que deux.
+    int row = -1;
+    for (int i = 0; i < model.rowCount(); ++i) {
+        if (model.data(model.index(i, 0), GameListModel::TitleRole).toString()
+            == QStringLiteral("Super Mario World"))
+            row = i;
+    }
+    QVERIFY(row >= 0);
+    QVERIFY(model.data(model.index(row, 0), GameListModel::LanguagesRole).toList().isEmpty());
+    QCOMPARE(model.data(model.index(row, 0), GameListModel::ExtraLanguageCountRole).toInt(), 0);
 }
 
 QTEST_MAIN(TestGameListModel)

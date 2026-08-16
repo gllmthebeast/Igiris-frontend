@@ -177,6 +177,28 @@ FocusScope {
         elide: Text.ElideRight
     }
 
+    // Langues que SEUL le catalogue connaît (export 1.7.0), et qu'aucune ROM ne fournit.
+    //
+    // Délibérément à l'écart des badges de plateforme, et sans leur apparence : ceux-là
+    // vivent sur l'axe illuminé / grisé, qui promet qu'une ROM peut les allumer. Celles-ci
+    // ne le seront jamais — IGDB donne les langues DU JEU, pas d'une release, et aucun CRC
+    // ne s'y rattache. Le §8 promet deux états ; en introduire un troisième déguisé en
+    // badge rendrait les deux premiers invérifiables.
+    Text {
+        id: catalogLangs
+
+        anchors { top: synopsis.visible ? synopsis.bottom : banner.bottom; topMargin: 8
+                  left: parent.left; leftMargin: 32
+                  right: parent.right; rightMargin: 32 }
+        visible: detail.catalogLanguages.length > 0
+        text: qsTr("Le catalogue annonce aussi : %1 — aucune ROM connue ne les fournit")
+              .arg(detail.catalogLanguages.join(", ").toUpperCase())
+        color: sheet.dimColor
+        style: Text.Outline; styleColor: sheet.outlineColor
+        font.pixelSize: 15
+        elide: Text.ElideRight
+    }
+
     Text {
         id: warning
         anchors { top: meta.bottom; topMargin: 10; left: coverArt.right; leftMargin: 24
@@ -193,7 +215,10 @@ FocusScope {
     ListView {
         id: platforms
 
-        anchors { top: synopsis.visible ? synopsis.bottom : banner.bottom; topMargin: 14
+        anchors { top: catalogLangs.visible ? catalogLangs.bottom
+                                           : (synopsis.visible ? synopsis.bottom
+                                                               : banner.bottom)
+                  topMargin: 14
                   left: parent.left; right: parent.right
                   bottom: colourKey.visible ? colourKey.top : legend.top
                   bottomMargin: 12 }
@@ -318,6 +343,29 @@ FocusScope {
         Keys.onEscapePressed: sheet.closed()
     }
 
+    // Aucun système lançable : ça se DIT, ça ne se laisse pas deviner d'une zone vide.
+    //
+    // Depuis l'export 1.7.0 le catalogue porte tout le jeu vidéo, pas seulement ce qu'on
+    // sait émuler : 9 679 jeux sur 17 260 n'ont que des plateformes non émulables, et 100
+    // n'ont aucune plateforme du tout. C'était auparavant impossible — l'export ne
+    // contenait que de l'émulable — donc ce cas n'avait jamais été rencontré.
+    //
+    // Le §0 est clair : « tous les jeux sont affichés, l'absence est une INFORMATION
+    // affichée ». Un blanc silencieux se lirait comme une panne.
+    Text {
+        anchors { left: parent.left; leftMargin: 32; right: parent.right; rightMargin: 32
+                  top: platforms.top; topMargin: 24 }
+        visible: platforms.count === 0
+        text: detail.nonEmulablePlatforms.length > 0
+              ? qsTr("Sorti sur %1 — aucun de ces systèmes ne s'émule ici.")
+                .arg(detail.nonEmulablePlatforms.join(", "))
+              : qsTr("Aucune plateforme au catalogue pour ce jeu.")
+        color: sheet.dimColor
+        style: Text.Outline; styleColor: sheet.outlineColor
+        font.pixelSize: 17
+        wrapMode: Text.WordWrap
+    }
+
     function tryLaunch() {
         // Le lancement ne part que d'une ligne verte : le modèle le refuse, l'interface
         // n'a pas à dupliquer la règle, seulement à montrer le message.
@@ -330,9 +378,14 @@ FocusScope {
         id: legend
         anchors { left: parent.left; leftMargin: 32; right: parent.right; rightMargin: 32
                   bottom: parent.bottom; bottomMargin: 24 }
+        // Ne promettre que ce que la fiche permet : sans une seule ligne de système, il n'y
+        // a ni lancement ni badge, et annoncer les deux serait une invitation à appuyer
+        // sur une touche qui ne fait rien.
         text: sheet.lastMessage.length > 0
               ? sheet.lastMessage
-              : qsTr("Entrée : lancer · Échap : retour · badge plein = langue fournie par une ROM possédée")
+              : (platforms.count === 0
+                 ? qsTr("Échap : retour")
+                 : qsTr("Entrée : lancer · Échap : retour · badge plein = langue fournie par une ROM possédée"))
         color: sheet.lastMessage.length > 0 ? "#d8a657" : sheet.dimColor
         font.pixelSize: 16
         wrapMode: Text.WordWrap
@@ -343,7 +396,9 @@ FocusScope {
         id: colourKey
         anchors { left: parent.left; leftMargin: 32; bottom: legend.top; bottomMargin: 10 }
         spacing: 22
-        visible: sheet.lastMessage.length === 0
+        // Rien à légender quand la liste est vide : ce serait expliquer un code couleur
+        // qui n'apparaît nulle part.
+        visible: sheet.lastMessage.length === 0 && platforms.count > 0
 
         Repeater {
             model: [

@@ -76,6 +76,7 @@ bool addFiches(const QString &path)
 
     const char *sql = R"(
         ALTER TABLE exp_game ADD COLUMN summary TEXT;
+        ALTER TABLE exp_game ADD COLUMN lang_catalog_mask INTEGER;
         ALTER TABLE exp_game ADD COLUMN mode_mask INTEGER;
         ALTER TABLE exp_game ADD COLUMN artwork_ref TEXT;
         ALTER TABLE exp_game_platform ADD COLUMN release_year INTEGER;
@@ -94,6 +95,13 @@ bool addFiches(const QString &path)
         -- igdb-2 : PAS de bandeau ni de synopsis, et solo|coop = 5. C'est le cas des 4,4 %
         -- du catalogue sans illustration : la fiche doit retomber sur la jaquette.
         UPDATE exp_game SET mode_mask = 5 WHERE game_key = 'igdb-2';
+
+        -- LANGUES DE CATALOGUE (1.7.0). igdb-1 : en(0) | ja(5) | de(3) = 41.
+        -- « en » et « ja » sont DÉJÀ fournis par une ROM, « de » ne l'est par aucune :
+        -- c'est le recouvrement partiel, le seul cas qui distingue les deux masques.
+        UPDATE exp_game SET lang_catalog_mask = 41 WHERE game_key = 'igdb-1';
+        -- igdb-2 n'a aucune langue de ROM : fr(1) ne vient QUE du catalogue.
+        UPDATE exp_game SET lang_catalog_mask = 2 WHERE game_key = 'igdb-2';
 
         -- L'année diffère de celle du jeu (1990) sur une plateforme et pas sur l'autre :
         -- c'est tout l'intérêt de la colonne, et le cas où un doublon se verrait.
@@ -136,7 +144,9 @@ bool buildExport(const QString &path, const QString &schemaVersion)
                                        PRIMARY KEY(game_key, display_name));
         INSERT INTO exp_game_platform VALUES
             ('igdb-1','snes','Super Nintendo',95,1),
-            ('igdb-1',NULL,'Game Boy Advance (non émulé ici)',0,0),
+            -- emu_score NULL, comme en production depuis le 1.7.0 : un taux de fidélité
+            -- d'émulation n'a aucun sens sur une plateforme qu'on n'émule pas.
+            ('igdb-1',NULL,'Game Boy Advance (non émulé ici)',NULL,0),
             ('igdb-2','arcade','Arcade',80,1);
 
         CREATE TABLE exp_rom_hash(crc32 TEXT NOT NULL, batocera_system TEXT NOT NULL,
@@ -199,6 +209,10 @@ private slots:
     void fiches_readColumnsByNameNotByPosition();
     void gameModes_orderedByBit();
     void releaseYear_isPerPlatformAndZeroWhenUnknown();
+
+    // --- export 1.7.0 : catalogue élargi et langues de catalogue ---
+    void catalogLanguages_areSeparateFromRomLanguages();
+    void catalogLanguages_absentFromOlderExportWithoutBreakingIt();
 
     void realExport_ifPresent();
 };
@@ -471,6 +485,13 @@ void TestExportDatabase::platformsForGame_preferredFirstAndNullIsNotATarget()
     // La plateforme sans clé est affichable mais pas lançable : à ne pas confondre avec
     // un statut noir.
     QVERIFY(!platforms.last().isEmulationTarget());
+
+    // Et elle ne porte AUCUN score. -1, pas 0 : « 0 » se lirait « émulation
+    // catastrophique » là où la bonne réponse est « sans objet » (§5).
+    QVERIFY(!platforms.last().hasEmuScore());
+    QCOMPARE(platforms.last().emuScore, -1);
+    QVERIFY(platforms.first().hasEmuScore());
+    QCOMPARE(platforms.first().emuScore, 95);
 }
 
 void TestExportDatabase::allPlatformKeys_excludesNull()
@@ -656,6 +677,63 @@ void TestExportDatabase::releaseYear_isPerPlatformAndZeroWhenUnknown()
     const auto arcade = db.platformsForGame(QStringLiteral("igdb-2"));
     QCOMPARE(arcade.size(), 1);
     QCOMPARE(arcade.first().releaseYear, 0);
+}
+
+void TestExportDatabase::catalogLanguages_areSeparateFromRomLanguages()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath("games.db");
+    QVERIFY(buildExport(path, "1.7.0"));
+    QVERIFY(addLanguages(path));
+    QVERIFY(addFiches(path));
+
+    ExportDatabase db;
+    QString        error;
+    QVERIFY2(db.open(path, &error), qPrintable(error));
+    QVERIFY(db.hasCatalogLanguages());
+
+    const auto game = db.gameByKey(QStringLiteral("igdb-1"));
+    QVERIFY(game.has_value());
+
+    // LE point de cette version : les deux masques cohabitent SANS se mélanger.
+    // lang_mask = en|fr|ja = 35, lang_catalog_mask = en|de|ja = 41. Un chargeur qui les
+    // confondrait rendrait la même valeur pour les deux, et personne ne le verrait.
+    QCOMPARE(db.langMaskByGame().value(QStringLiteral("igdb-1")), quint64(35));
+    QCOMPARE(game->langCatalogMask, quint64(41));
+    QVERIFY(game->langCatalogMask != db.langMaskByGame().value(QStringLiteral("igdb-1")));
+
+    // Un jeu qu'aucun dat ne documente peut n'exister QUE par le catalogue : c'est le cas
+    // de 6 879 jeux en production, et c'est tout l'apport de la colonne.
+    const auto other = db.gameByKey(QStringLiteral("igdb-2"));
+    QVERIFY(other.has_value());
+    QCOMPARE(db.langMaskByGame().value(QStringLiteral("igdb-2"), 0), quint64(0));
+    QCOMPARE(other->langCatalogMask, quint64(2));
+
+    // Le référentiel de bits est COMMUN aux deux masques — c'est ce qui rend le mélange
+    // possible, donc dangereux, et c'est pourquoi rien ne les fusionne côté chargeur.
+    for (const auto &language : db.languages()) {
+        if (language.code == QStringLiteral("de"))
+            QVERIFY(game->langCatalogMask & language.bit());
+    }
+}
+
+void TestExportDatabase::catalogLanguages_absentFromOlderExportWithoutBreakingIt()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath("games.db");
+    QVERIFY(buildExport(path, "1.4.0"));
+    QVERIFY(addLanguages(path));
+
+    ExportDatabase db;
+    QVERIFY(db.open(path, nullptr));
+    QVERIFY(!db.hasCatalogLanguages());
+
+    // Absente ⇒ 0, et surtout pas une valeur reprise de lang_mask : le filtre « existe »
+    // doit alors retomber exactement sur le comportement du 1.4.0.
+    const auto game = db.gameByKey(QStringLiteral("igdb-1"));
+    QVERIFY(game.has_value());
+    QCOMPARE(game->langCatalogMask, quint64(0));
+    QCOMPARE(db.langMaskByGame().value(QStringLiteral("igdb-1")), quint64(35));
 }
 
 void TestExportDatabase::realExport_ifPresent()

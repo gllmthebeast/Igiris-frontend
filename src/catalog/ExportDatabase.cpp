@@ -129,6 +129,10 @@ bool ExportDatabase::open(const QString &path, QString *error)
                                  QStringLiteral("release_year"));
     m_hasModes       = hasColumn(QStringLiteral("exp_game"), QStringLiteral("mode_mask"))
                  && hasTable(m_db, QStringLiteral("exp_game_mode"));
+    // Langues de catalogue (1.7.0). Elles réemploient exp_language, donc rien de plus à
+    // détecter que la colonne elle-même.
+    m_hasCatalogLanguages =
+        hasColumn(QStringLiteral("exp_game"), QStringLiteral("lang_catalog_mask"));
 
     if (m_meta.major != schema::kSupportedMajor) {
         const QString message =
@@ -280,10 +284,12 @@ QString ExportDatabase::gameColumns() const
     // MÊME nombre de colonnes dans le MÊME ordre quelle que soit la version de l'export,
     // donc readGame() lit des indices constants. Une colonne qui apparaît ne peut pas
     // décaler celles qui la suivent.
-    return QStringLiteral("game_key, title, year, rating, search_key, cover_ref, %1, %2, %3")
+    return QStringLiteral("game_key, title, year, rating, search_key, cover_ref, "
+                          "%1, %2, %3, %4")
         .arg(columnOrNull(m_hasArtwork, QStringLiteral("artwork_ref")),
              columnOrNull(m_hasSummary, QStringLiteral("summary")),
-             columnOrNull(m_hasModes, QStringLiteral("mode_mask")));
+             columnOrNull(m_hasModes, QStringLiteral("mode_mask")),
+             columnOrNull(m_hasCatalogLanguages, QStringLiteral("lang_catalog_mask")));
 }
 
 Game ExportDatabase::readGame(sqlite3_stmt *stmt)
@@ -298,6 +304,7 @@ Game ExportDatabase::readGame(sqlite3_stmt *stmt)
     game.artworkRef = columnText(stmt, 6);
     game.summary    = columnText(stmt, 7);
     game.modeMask   = static_cast<quint64>(sqlite3_column_int64(stmt, 8));
+    game.langCatalogMask = static_cast<quint64>(sqlite3_column_int64(stmt, 9));
     return game;
 }
 
@@ -384,7 +391,12 @@ QList<GamePlatform> ExportDatabase::platformsForGame(const QString &gameKey) con
         GamePlatform platform;
         platform.displayName = columnText(stmt, 0);
         platform.platformKey = columnText(stmt, 1); // NULL possible : plateforme non émulée
-        platform.emuScore    = sqlite3_column_int(stmt, 2);
+        // NULL ⇒ -1, et surtout pas 0 : depuis le 1.7.0 il désigne une plateforme non
+        // émulable, pas une émulation ratée. Vérifié sur l'export publié — les 40 511
+        // lignes à emu_score NULL sont EXACTEMENT celles à platformKey NULL.
+        platform.emuScore = sqlite3_column_type(stmt, 2) == SQLITE_NULL
+                                ? -1
+                                : sqlite3_column_int(stmt, 2);
         platform.isPreferred = sqlite3_column_int(stmt, 3) != 0;
         platform.releaseYear = sqlite3_column_int(stmt, 4); // 0 si NULL ou colonne absente
         platforms.append(platform);

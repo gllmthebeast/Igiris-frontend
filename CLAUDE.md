@@ -4,7 +4,7 @@
 > **Frontend embarqué** (Batocera / Raspberry Pi en premier, mais pas uniquement — §1).
 > Le backend est un projet **SÉPARÉ** : `/opt/igiris` sur cette même VM, avec son propre
 > `CLAUDE.md`. Ce projet ne démarre vraiment qu'une fois l'export générable de bout en bout
-> — ce qui est le cas aujourd'hui (schéma **1.6.0**, cf. `data/`).
+> — ce qui est le cas aujourd'hui (schéma **1.7.0**, cf. `data/`).
 
 ---
 
@@ -140,20 +140,22 @@ l'ancien. Un export tronqué ne doit jamais devenir l'export courant.
 
 ---
 
-## 3. Le schéma **réellement livré** — version 1.6.0
+## 3. Le schéma **réellement livré** — version 1.7.0
 
-⚠️ Ceci est le schéma vérifié dans `data/games.db` au 2026-08-16. Pour ce qui est *demandé*
-au backend mais **pas encore livré** (`platform_key`), voir §9 — et ne pas coder contre ces
-champs avant qu'ils existent.
+⚠️ Schéma vérifié dans `data/games.db` au 2026-08-16, APRÈS l'élargissement du catalogue
+(§3.1). Pour ce qui est *demandé* au backend mais **pas encore livré** (`platform_key`),
+voir §9 — et ne pas coder contre ces champs avant qu'ils existent.
 
 ```sql
 exp_meta(key, value)
     -- schema_version, generated_at, games, platforms, rom_hashes, arcade_romsets, dat_sets
-    -- valeurs actuelles : 7 581 jeux · 18 555 plateformes · 71 006 hashes
-    --                     2 697 romsets arcade · 96 dats · 63 systèmes distincts
+    -- valeurs actuelles : 17 260 jeux · 59 066 plateformes · 71 006 hashes
+    --                     2 697 romsets arcade · 96 dats · 71 systèmes émulables
+    -- ⚠ les hashes n'ont PAS bougé en 1.7.0 : les dats ne couvrent que l'émulable, donc
+    --   tout ce qui s'est ajouté est du catalogue et jamais de l'identification.
 
 exp_game(game_key, title, search_key, year, cover_ref, artwork_ref, rating,
-         summary, mode_mask, lang_mask)
+         summary, mode_mask, lang_catalog_mask, lang_mask)
     -- game_key : identifiant stable, = title.id côté serveur (« igdb-3192 »)
     -- search_key : nom NORMALISÉ, à utiliser pour la recherche locale (jamais à afficher)
     -- cover_ref : URL IGDB — voir la limite « hors ligne » en §10
@@ -166,8 +168,12 @@ exp_game(game_key, title, search_key, year, cover_ref, artwork_ref, rating,
 exp_game_platform(game_key, batocera_system, display_name, emu_score, is_preferred,
                   release_year)
     -- PRIMARY KEY (game_key, display_name)
-    -- batocera_system : NULL = plateforme d'origine non émulée (pas une cible)
-    -- emu_score : fidélité 0..100 (voir §5)
+    -- batocera_system : NULL = plateforme d'origine non émulée (pas une cible).
+    --   ⚠ C'était 0 ligne avant le 1.7.0, c'est 40 511 sur 59 066 aujourd'hui — 69 %.
+    --   Le code existait, il n'avait jamais été exercé une seule fois.
+    -- emu_score : fidélité 0..100 (voir §5), ou NULL sur une plateforme non émulée —
+    --   un taux d'émulation n'a aucun sens pour une PS4. Le chargeur le rend en -1, et
+    --   surtout pas en 0 : « 0 » se lirait « émulation catastrophique ».
     -- is_preferred : plateforme élue par les votes. CORRIGÉ en 1.4.0 : 31 lignes sur
     --   18 555, sans jeu à double élection. Il ne marque plus « jamais comparé ».
 
@@ -202,30 +208,67 @@ exp_game.artwork_ref
     -- ILLUSTRATION de bandeau : horizontale, composée, SANS texte de pochette. Ce n'est
     -- PAS une jaquette en plus grand — une jaquette est verticale et porte logo, mentions
     -- et code-barres, qui se retrouvaient tronqués en travers du bandeau de la fiche.
-    -- 7 247 jeux sur 7 581 (95,6 %). Vide → la fiche retombe sur cover_ref, en le sachant.
+    -- 16 811 / 17 260 (97,4 %). Vide → la fiche retombe sur cover_ref, en le sachant.
 
 exp_game_platform.release_year
-    -- Année de sortie SUR CETTE PLATEFORME, et non celle du jeu. 18 555 / 18 555.
-    -- Pas un doublon de exp_game.year : 7 711 lignes (42 %) en diffèrent. C'est ce qui
+    -- Année de sortie SUR CETTE PLATEFORME, et non celle du jeu. 59 066 / 59 066.
+    -- Pas un doublon de exp_game.year : 22 266 lignes (38 %) en diffèrent. C'est ce qui
     -- permet à la fiche de dater chaque système qu'elle aligne côte à côte.
 
 -- ------------------------------------------------- ajouts du 1.6.0 : ce qui raconte le jeu
 
 exp_game.summary
-    -- Synopsis IGDB. 7 562 / 7 581 (99,7 %). ⚠ TOUJOURS EN ANGLAIS, y compris sur une
+    -- Synopsis IGDB. 17 220 / 17 260 (99,8 %). ⚠ TOUJOURS EN ANGLAIS, y compris sur une
     -- interface française : IGDB n'en fournit pas de traduit. Pas de colonne summary_lang,
     -- elle porterait 'en' sur 100 % des lignes — la règle est ici, et c'est voulu.
 
 exp_game.mode_mask + exp_game_mode(mode_key, label, bit_index)
     -- Modes de jeu, MÊME PATRON qu'exp_language : bit_index à vie, filtrage par ET
-    -- binaire. 7 359 jeux (97,1 %) · 6 modes au référentiel, livré ENTIER (le menu de
+    -- binaire. 16 853 jeux (97,6 %) · 6 modes au référentiel, livré ENTIER (le menu de
     -- filtres ne dépend donc pas du contenu du catalogue).
     --
     -- C'est la réponse au « nombre de joueurs » demandé, PAS ce qui avait été demandé :
     -- le format « 1-4 » n'existe chez IGDB que pour 12 % du catalogue rétro, quand les
     -- modes en couvrent 97 %. On perd d'afficher « 1-4 », on gagne le filtre
     -- « jouable à plusieurs » — 3 333 jeux au lieu de ~900.
+
+-- ------------------------- ajouts du 1.7.0 : le catalogue entier, et sa seconde source
+
+exp_game.lang_catalog_mask
+    -- ⚠ LE PIÈGE DE CETTE VERSION. Il PARTAGE le registre de bits d'exp_language avec
+    -- lang_mask, donc les confondre est facile ET silencieux. Ils ne disent pas la même
+    -- chose :
+    --
+    --   lang_mask          « une ROM du catalogue fournit cette langue » → illuminable
+    --   lang_catalog_mask  « le jeu EXISTE dans cette langue » (IGDB)    → JAMAIS
+    --
+    -- IGDB ne connaît ni release ni CRC : aucun hash auquel rattacher la langue. D'où :
+    --   filtre « existe en fr »   → lang_mask | lang_catalog_mask
+    --   filtre « jouable en fr »  → exp_game_language ∩ CRC possédés   (INCHANGÉ)
+    --   badges de la vue liste    → lang_mask SEUL (voir §8)
+    --
+    -- 8 121 jeux, dont 6 879 où les dats sont muets. Couverture du filtre « existe » :
+    -- 35 % → 74,5 % sur le catalogue élargi.
 ```
+
+### 3.1 — L'élargissement du 1.7.0, et ce qu'il exerce
+
+Le catalogue ne se limite plus à l'émulable : le frontend a vocation à devenir un
+**launcher**. Trois situations étaient **structurellement impossibles** avant, et sont
+désormais courantes — donc trois chemins de code qui n'avaient jamais servi :
+
+| Situation | Volume | Ce que la fiche doit faire |
+|---|---|---|
+| Plateforme non émulable | 40 511 lignes (69 %) | l'exclure de la liste des systèmes, mais la **nommer** |
+| Jeu sans aucun système lançable | 9 679 jeux | dire « sorti sur X — aucun ne s'émule ici » |
+| Jeu sans aucune ligne plateforme | 100 jeux | tolérer une liste **vide** sans rien casser |
+
+Le §0 tranche : « l'absence de ROM est une *information affichée*, pas un filtre ». Une
+zone vide et muette se lirait comme une panne, pas comme une information.
+
+**Coût mesuré** sur la VM de développement, catalogue complet : chargement 97 ms (55 ms
+avant), recherche **1,9 ms par frappe** (0,8 ms avant), bascule de filtre 0,3 ms. Linéaire
+en taille de catalogue, et très en dessous d'une image à 60 Hz — rien à optimiser.
 
 > **Ce que l'export ne dit pas, et ne dira pas.** Le backend a tranché : aucune langue
 > n'est déduite pour les régions `Europe`, `World` et `Asia`, qui sont multilingues. Un jeu
@@ -341,7 +384,7 @@ fiche de jeu (§7). La liste reste dense et lisible à distance, sur un écran d
 
 | Filtre | Nature | Résolution |
 |---|---|---|
-| Langue — existe au catalogue | statique | index de l'export |
+| Langue — existe au catalogue | statique | index de l'export, **deux sources** (§3) |
 | Langue — possédée | dynamique | export × index local |
 | Plateforme | statique | index de l'export |
 | Possédé / manquant | dynamique | index local |
@@ -445,6 +488,20 @@ Les deux doivent être proposés, avec des libellés sans ambiguïté.
 
 **Combinaison multi-langues** : passer par `exp_game.lang_mask` et un ET binaire, **pas**
 par une jointure répétée sur `exp_game_language`. Le masque est fourni précisément pour ça.
+
+### ⚠️ Les langues de catalogue ne sont PAS des badges
+
+Depuis le 1.7.0, `lang_catalog_mask` élargit le filtre « existe en… ». Il ne doit **jamais**
+alimenter les badges de la vue liste.
+
+Un badge gris promet quelque chose : « télécharge la bonne ROM et il s'allumera ». Une
+langue venue d'IGDB ne peut être rattachée à aucun CRC, donc ce badge resterait gris quoi
+que fasse l'utilisateur. Ce serait un **troisième état déguisé en second**, alors que cette
+section n'en promet que deux.
+
+La **fiche** les montre, séparément et sans l'apparence d'un badge : « le catalogue annonce
+aussi : PL — aucune ROM connue ne les fournit ». Dit comme ça, c'est une information ; mis
+en badge, c'était une promesse invérifiable.
 
 **Règle de bit** : chaque langue occupe une position de bit fixe, attribuée **à vie** par
 igiris. Le frontend ne déduit **jamais** une position depuis l'ordre alphabétique ou
@@ -586,6 +643,9 @@ C'est tout. **Déterministe, rapide, hors ligne.**
 - **Le synopsis est en anglais**, sur une interface française. IGDB n'en fournit pas de
   traduit ; le backend l'a vérifié plutôt que supposé. Mieux vaut le texte réel que rien,
   mais la fiche ne le présente pas comme localisé.
+- **9 679 jeux sur 17 260 n'ont aucun système émulable** depuis le 1.7.0 — PC, PS4,
+  Switch… Ils s'affichent, se cherchent, ont jaquette, bandeau et synopsis, mais aucun
+  n'est lançable. C'est l'objet du chantier launcher ; en attendant, la fiche le **dit**.
 - **~17 % des jeux éligibles ne sont pas encore rattachés à un dump.** Le contenu s'enrichit
   à chaque passage mensuel ; **la structure, elle, ne bouge pas**.
 - **Les CRC ambigus sont volontairement absents.** Un même CRC peut désigner plusieurs jeux

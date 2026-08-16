@@ -320,6 +320,86 @@ int runExportCommand(const QString &path)
                     withYear, rows, differing);
     }
 
+    // [7] Le catalogue élargi du 1.7.0. Ce n'est pas de la statistique d'agrément : chacun
+    // de ces nombres était structurellement NUL avant cette version, donc chacun exerce un
+    // chemin de code qui n'avait jamais servi une seule fois.
+    {
+        const auto games    = db.allGames();
+        const auto langs    = db.languages();
+        const auto romMasks = db.langMaskByGame();
+
+        quint64 registry = 0;
+        for (const auto &language : langs)
+            registry |= language.bit();
+
+        int romOnly = 0, catalogOnly = 0, both = 0, neither = 0, unknownBit = 0;
+        for (const auto &game : games) {
+            const quint64 fromRoms    = romMasks.value(game.gameKey, 0);
+            const quint64 fromCatalog = game.langCatalogMask;
+            if (fromCatalog & ~registry)
+                ++unknownBit;
+            if (fromRoms && fromCatalog)
+                ++both;
+            else if (fromRoms)
+                ++romOnly;
+            else if (fromCatalog)
+                ++catalogOnly;
+            else
+                ++neither;
+        }
+
+        std::printf("\n[7] catalogue élargi\n");
+        if (!db.hasCatalogLanguages()) {
+            std::printf("    langues de catalogue   : absentes de cet export\n");
+        } else {
+            std::printf("    langues : %d par ROM seule · %d par catalogue seul · %d les "
+                        "deux · %d aucune\n",
+                        romOnly, catalogOnly, both, neither);
+            const int couvert = romOnly + catalogOnly + both;
+            std::printf("    couverture du filtre « existe en… » : %d/%lld (%.1f %%)\n",
+                        couvert, static_cast<long long>(games.size()),
+                        games.isEmpty() ? 0.0 : 100.0 * couvert / games.size());
+            if (unknownBit > 0) {
+                // Un bit hors référentiel ne s'afficherait nulle part ET ne filtrerait
+                // rien : il passerait totalement inaperçu, ce qui est le pire des cas.
+                std::fprintf(stderr,
+                             "✗ %d jeux portent une langue de catalogue absente du "
+                             "référentiel\n",
+                             unknownBit);
+                return 1;
+            }
+        }
+
+        // Plateformes non émulables : le cas « rien à lancer » n'existait pas avant.
+        int sansEmulable = 0, sansPlateforme = 0, scoreSurNonEmulable = 0;
+        for (const auto &game : games) {
+            const auto platforms = db.platformsForGame(game.gameKey);
+            if (platforms.isEmpty()) {
+                ++sansPlateforme;
+                ++sansEmulable;
+                continue;
+            }
+            bool emulable = false;
+            for (const auto &platform : platforms) {
+                if (platform.isEmulationTarget())
+                    emulable = true;
+                else if (platform.hasEmuScore())
+                    ++scoreSurNonEmulable;
+            }
+            if (!emulable)
+                ++sansEmulable;
+        }
+        std::printf("    jeux sans système lançable : %d · dont sans aucune plateforme : %d\n",
+                    sansEmulable, sansPlateforme);
+        if (scoreSurNonEmulable > 0) {
+            // emu_score est un taux de fidélité d'ÉMULATION : sur une plateforme qu'on
+            // n'émule pas, TOUTE valeur est un mensonge, y compris 0.
+            std::fprintf(stderr, "✗ %d plateformes non émulables portent un emu_score\n",
+                         scoreSurNonEmulable);
+            return 1;
+        }
+    }
+
     if (checked > 0 && matched != checked)
         return 1;
     if (romsetsChecked > 0 && romsetsMatched != romsetsChecked)
