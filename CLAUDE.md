@@ -4,7 +4,7 @@
 > **Frontend embarqué** (Batocera / Raspberry Pi en premier, mais pas uniquement — §1).
 > Le backend est un projet **SÉPARÉ** : `/opt/igiris` sur cette même VM, avec son propre
 > `CLAUDE.md`. Ce projet ne démarre vraiment qu'une fois l'export générable de bout en bout
-> — ce qui est le cas aujourd'hui (schéma **1.7.0**, cf. `data/`).
+> — ce qui est le cas aujourd'hui (schéma **1.8.0**, cf. `data/`).
 
 ---
 
@@ -140,9 +140,9 @@ l'ancien. Un export tronqué ne doit jamais devenir l'export courant.
 
 ---
 
-## 3. Le schéma **réellement livré** — version 1.7.0
+## 3. Le schéma **réellement livré** — version 1.8.0
 
-⚠️ Schéma vérifié dans `data/games.db` au 2026-08-16, APRÈS l'élargissement du catalogue
+⚠️ Schéma vérifié dans `data/games.db` au 2026-08-17, APRÈS l'élargissement du catalogue
 (§3.1). Pour ce qui est *demandé* au backend mais **pas encore livré** (`platform_key`),
 voir §9 — et ne pas coder contre ces champs avant qu'ils existent.
 
@@ -249,6 +249,29 @@ exp_game.lang_catalog_mask
     --
     -- 8 121 jeux, dont 6 879 où les dats sont muets. Couverture du filtre « existe » :
     -- 35 % → 74,5 % sur le catalogue élargi.
+
+-- --------------------------------------- ajouts du 1.8.0 : les autres noms des jeux
+
+exp_game_alias(game_key, alias_key, alias_name)
+    -- PRIMARY KEY (game_key, alias_key), WITHOUT ROWID. 18 839 lignes, 9 212 jeux (53 %).
+    --
+    -- alias_key   NORMALISÉ par le serveur, avec EXACTEMENT la même fonction que
+    --             exp_game.search_key — vérifié dans le code du backend, un seul
+    --             `norm_key()` appelé aux deux endroits. C'est ce qui rend la recherche
+    --             par alias possible sans que l'appareil normalise quoi que ce soit (§0).
+    -- alias_name  LISIBLE, et il n'existe que pour être AFFICHÉ.
+    --
+    -- ⚠ Les deux colonnes sont dans la MÊME ligne, et c'est le point de conception : deux
+    --   listes parallèles à tenir alignées auraient rejoué le décalage silencieux qui a
+    --   déjà frappé ce contrat deux fois.
+    --
+    -- Exclus à l'export : les 2 027 alias qui normalisent comme leur propre titre (ils ne
+    -- peuvent rien changer). Conservés : les 228 alias que plusieurs jeux partagent — un
+    -- CRC ambigu casse une IDENTIFICATION, un alias ambigu enrichit une RECHERCHE.
+    --
+    -- Départage des collisions de clé : le nom le plus COURT, puis l'ordre alphabétique.
+    -- Sans règle, le survivant dépendait de l'ordre d'insertion, donc changeait d'un
+    -- export à l'autre sans raison.
 ```
 
 ### 3.1 — L'élargissement du 1.7.0, et ce qu'il exerce
@@ -390,6 +413,32 @@ fiche de jeu (§7). La liste reste dense et lisible à distance, sur un écran d
 | Possédé / manquant | dynamique | index local |
 | Année, arcade | statique | index de l'export |
 | Mode de jeu — solo, multi, coop… | statique | index de l'export (1.6.0) |
+
+### La recherche, et les autres noms des jeux
+
+Depuis le 1.8.0, la recherche porte sur `search_key` **puis**, si le titre ne correspond
+pas, sur les `alias_key` du jeu. Taper `lttp`, `ff7` ou un titre japonais fonctionne — sur
+53 % du catalogue, qui porte au moins un autre nom.
+
+**La ligne DIT par quel alias elle a été trouvée.** Sans ça, taper `lttp` fait apparaître
+« The Legend of Zelda: A Link to the Past » — un titre qui ne contient aucun des caractères
+tapés, ce qui se lit comme un bug. C'est la même règle que pour les langues de catalogue du
+§8 : un résultat élargi doit pouvoir s'expliquer.
+
+Deux détails qui comptent :
+
+- les alias ne sont testés que **si le titre ne mord pas** — le cas courant ne coûte rien ;
+- un alias **exact** l'emporte sur un alias qui contient seulement la saisie. Un jeu porte
+  souvent `LTTP` et `TLoZ: ALttP` : taper l'un doit montrer l'un.
+
+**Coût mesuré** sur le catalogue complet : **1,85 → 3,7 ms par frappe**. Toujours très en
+dessous des 16 ms d'une image.
+
+> ⚠️ **L'ordre reste alphabétique**, comme partout ailleurs dans cette liste : `lttp` remonte
+> *A Link Between Worlds* avant *A Link to the Past*, parce que le titre du premier vient
+> avant. Cette liste **filtre**, elle ne classe pas — c'est le §6 tel qu'il est écrit. Y
+> introduire un classement par pertinence serait une décision de conception à prendre
+> explicitement, pas un effet de bord des alias.
 
 La distinction statique / dynamique n'est pas cosmétique : un filtre **statique** est un
 index précalculé par igiris, un filtre **dynamique** impose un croisement avec le résultat
@@ -655,6 +704,11 @@ C'est tout. **Déterministe, rapide, hors ligne.**
 - `exp_game_platform.batocera_system` peut être **NULL** : plateforme d'origine non émulée.
   Ces lignes existent pour l'affichage (le jeu est sorti sur cette machine), pas pour le
   lancement. Ne pas les traiter comme des cibles.
+- **`is_preferred` ne veut pas dire « lançable ».** Depuis le 1.7.0, **38 des 69 lignes
+  élues** portent sur une plateforme non émulable — la communauté a voté pour la version
+  X360 d'un jeu qu'on ne sait pas émuler. Les deux notions coïncidaient jusque-là ; elles ne
+  coïncident plus. La fiche exclut ces lignes avant de choisir son défaut, et un test le
+  verrouille.
 
 ---
 
@@ -722,6 +776,28 @@ parfaitement rester en C# — ils ne tournent pas sur l'appareil.
 ---
 
 ## 13. Rapport avec le projet backend
+
+### ⚠️ La boîte aux lettres — `~/igiris-echange/`
+
+**À lire au début de toute session qui touche au contrat d'export.**
+
+```
+~/igiris-echange/INDEX.md      ← CE FICHIER FAIT FOI
+~/igiris-echange/demandes/     frontend → backend
+~/igiris-echange/reponses/     backend  → frontend
+~/igiris-echange/notes/        dans les deux sens
+```
+
+C'est le **seul** mécanisme de notification entre les deux projets. Un document déposé sans
+ligne dans `INDEX.md` sera manqué.
+
+Avant le 2026-08-17, chacun déposait dans le dépôt de l'autre : la réponse du backend sur
+les alias est restée **non suivie par git** dans `docs/demandes-backend/`, trouvée par
+hasard. Un `git status` chez soi ne montre jamais ce que l'autre a déposé chez soi.
+
+Le dossier est **hors des deux dépôts** — pas de push, pas d'accès croisé. `docs/demandes-backend/`
+reste l'**archive** de ce projet : on y copie et on y commite ce qui nous concerne, une fois
+lu. La boîte aux lettres porte l'état courant, le dépôt porte l'historique.
 
 | | igiris (backend) | igiris-frontend (ce projet) |
 |---|---|---|

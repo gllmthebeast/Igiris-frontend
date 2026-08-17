@@ -125,6 +125,13 @@ public:
         LanguagesRole,
         // Le « +N » : les langues du jeu qui ne tiennent pas dans la ligne.
         ExtraLanguageCountRole,
+        // L'alias qui a produit ce résultat, VIDE quand c'est le titre qui a mordu
+        // (export 1.8.0).
+        //
+        // Sans lui, taper « lttp » ferait apparaître « The Legend of Zelda: A Link to the
+        // Past » — un titre qui ne contient aucun des caractères tapés. À l'écran, ça ne se
+        // distingue pas d'un bug.
+        MatchedAliasRole,
     };
 
     enum Ownership {
@@ -154,6 +161,10 @@ public:
     // Le référentiel de modes de jeu. Pas de masque à passer en second argument,
     // contrairement aux langues : il voyage déjà dans catalog::Game::modeMask.
     void setGameModes(QList<catalog::GameMode> modes);
+
+    // Les autres noms de chaque jeu (export 1.8.0). Appelable avant ou après
+    // setCatalogue() : les alias sont conservés et réappliqués.
+    void setAliases(QHash<QString, QList<catalog::GameAlias>> aliasesByGame);
 
     int      rowCount(const QModelIndex &parent = QModelIndex()) const override;
     QVariant data(const QModelIndex &index, int role) const override;
@@ -238,14 +249,26 @@ private:
         // le badge calculables au défilement sans allouer.
         quint64 langMask      = 0;
         quint64 ownedLangMask = 0;
+
+        // Les autres noms du jeu, et l'indice de celui qui a fait passer la recherche.
+        // -1 = c'est le titre qui a mordu, ou aucun filtre de recherche n'est actif.
+        //
+        // `mutable` parce que matches() est logiquement un prédicat : il ne change pas ce
+        // que le modèle CONTIENT, seulement de quoi expliquer une correspondance.
+        QList<catalog::GameAlias> aliases;
+        mutable int               matchedAlias = -1;
     };
 
+    // Reste un prédicat const, mais elle mémorise au passage l'alias qui a produit le
+    // résultat (champ `mutable`) : le calcul est déjà fait au moment du filtrage, et le
+    // refaire à l'affichage serait le faire deux fois par ligne visible.
     bool matches(const Entry &entry) const;
     void rebuild();
     // Les bits de langue d'un jeu, dans l'ordre d'affichage du §8 : possédées d'abord,
     // puis la langue de l'interface, puis l'ordre stable du catalogue.
     QList<int> orderedLanguageBits(const Entry &entry) const;
     void applyLanguageMasks();
+    void applyAliases();
     // Le masque exigé par le filtre, recalculé quand le filtre ou le référentiel change.
     void recomputeRequiredMask();
 
@@ -268,6 +291,7 @@ private:
     QStringList              m_availableLanguages;
     QHash<QString, quint64>  m_langMaskByGame;
     QHash<QString, quint64>  m_ownedLangMaskByGame;
+    QHash<QString, QList<catalog::GameAlias>> m_aliasesByGame;
     QStringList              m_languageFilter;
     QStringList              m_unfilterableLanguages;
     quint64                  m_requiredLangMask = 0;

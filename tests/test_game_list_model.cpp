@@ -142,6 +142,12 @@ private slots:
     // --- export 1.7.0 : langues de catalogue ---
     void catalogLanguages_widenExistsButNeverPlayable();
     void catalogLanguages_doNotLightUpBadges();
+
+    // --- export 1.8.0 : alias de noms ---
+    void aliases_findGamesTheTitleAloneCannot();
+    void aliases_reportWhichOneMatched();
+    void aliases_preferTheExactOneOverASubstring();
+    void aliases_areAbsentFromAnOlderExportWithoutBreakingIt();
 };
 
 void TestGameListModel::languages_areUnavailableOnAnExportWithoutThem()
@@ -728,6 +734,103 @@ void TestGameListModel::catalogLanguages_doNotLightUpBadges()
     QVERIFY(row >= 0);
     QVERIFY(model.data(model.index(row, 0), GameListModel::LanguagesRole).toList().isEmpty());
     QCOMPARE(model.data(model.index(row, 0), GameListModel::ExtraLanguageCountRole).toInt(), 0);
+}
+
+// Les autres noms des trois jeux, tels que l'export 1.8.0 les donne.
+//
+//   igdb-3  « Super Mario World »  ← alias « smw » ET « smw usa », pour départager exact
+//                                    et sous-chaîne
+//   igdb-2  « The Legend of Zelda » ← alias « lttp »
+//   igdb-1  aucun alias — plus d'un jeu sur deux est dans ce cas en production
+QHash<QString, QList<igiris::catalog::GameAlias>> sampleAliases()
+{
+    using igiris::catalog::GameAlias;
+    return {
+        { QStringLiteral("igdb-2"), { { QStringLiteral("lttp"), QStringLiteral("LTTP") } } },
+        { QStringLiteral("igdb-3"),
+          { { QStringLiteral("smw usa"), QStringLiteral("SMW USA") },
+            { QStringLiteral("smw"), QStringLiteral("SMW") } } },
+    };
+}
+
+void TestGameListModel::aliases_findGamesTheTitleAloneCannot()
+{
+    GameListModel model;
+    feed(model);
+
+    // Sans alias, « lttp » ne peut RIEN trouver : aucun search_key ne le contient. C'est
+    // exactement l'état d'avant le 1.8.0, et le motif de la demande.
+    model.setFilter(QStringLiteral("lttp"));
+    QCOMPARE(model.rowCount(), 0);
+
+    model.setAliases(sampleAliases());
+    QCOMPARE(model.rowCount(), 1);
+    QCOMPARE(model.data(model.index(0, 0), GameListModel::TitleRole).toString(),
+             QStringLiteral("The Legend of Zelda"));
+}
+
+void TestGameListModel::aliases_reportWhichOneMatched()
+{
+    GameListModel model;
+    feed(model);
+    model.setAliases(sampleAliases());
+
+    // Trouvé PAR UN ALIAS : la ligne doit pouvoir dire lequel, sinon elle affiche un titre
+    // qui ne contient aucun des caractères tapés et ça se lit comme un bug.
+    model.setFilter(QStringLiteral("lttp"));
+    QCOMPARE(model.data(model.index(0, 0), GameListModel::MatchedAliasRole).toString(),
+             QStringLiteral("LTTP"));
+
+    // Trouvé PAR SON TITRE : rien à expliquer, donc rien à afficher. Montrer un alias ici
+    // serait du bruit sur une liste qui doit rester dense (§6).
+    model.setFilter(QStringLiteral("zelda"));
+    QCOMPARE(model.rowCount(), 1);
+    QVERIFY(model.data(model.index(0, 0), GameListModel::MatchedAliasRole)
+                .toString()
+                .isEmpty());
+
+    // Et sans recherche du tout, aucune ligne ne prétend avoir été trouvée par un alias.
+    model.setFilter(QString());
+    QCOMPARE(model.rowCount(), 3);
+    for (int row = 0; row < model.rowCount(); ++row) {
+        QVERIFY(model.data(model.index(row, 0), GameListModel::MatchedAliasRole)
+                    .toString()
+                    .isEmpty());
+    }
+}
+
+void TestGameListModel::aliases_preferTheExactOneOverASubstring()
+{
+    GameListModel model;
+    feed(model);
+    model.setAliases(sampleAliases());
+
+    // « smw usa » vient AVANT « smw » dans la liste, et contient lui aussi la saisie. Sans
+    // règle, c'est lui qui serait affiché — alors que l'utilisateur a tapé l'autre.
+    model.setFilter(QStringLiteral("smw"));
+    QCOMPARE(model.rowCount(), 1);
+    QCOMPARE(model.data(model.index(0, 0), GameListModel::MatchedAliasRole).toString(),
+             QStringLiteral("SMW"));
+
+    // Une saisie qui ne correspond exactement à aucun alias retombe sur la sous-chaîne.
+    model.setFilter(QStringLiteral("smw u"));
+    QCOMPARE(model.rowCount(), 1);
+    QCOMPARE(model.data(model.index(0, 0), GameListModel::MatchedAliasRole).toString(),
+             QStringLiteral("SMW USA"));
+}
+
+void TestGameListModel::aliases_areAbsentFromAnOlderExportWithoutBreakingIt()
+{
+    GameListModel model;
+    feed(model); // catalogue sans setAliases()
+
+    // Un export antérieur au 1.8.0 : la recherche porte sur le titre seul, et rien ne
+    // prétend le contraire. Les mineures sont additives (§2).
+    model.setFilter(QStringLiteral("zelda"));
+    QCOMPARE(model.rowCount(), 1);
+    QVERIFY(model.data(model.index(0, 0), GameListModel::MatchedAliasRole)
+                .toString()
+                .isEmpty());
 }
 
 QTEST_MAIN(TestGameListModel)

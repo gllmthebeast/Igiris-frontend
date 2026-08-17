@@ -391,6 +391,73 @@ int runExportCommand(const QString &path)
         }
         std::printf("    jeux sans système lançable : %d · dont sans aucune plateforme : %d\n",
                     sansEmulable, sansPlateforme);
+
+        // --- [8] alias de noms (1.8.0) ---------------------------------------------------
+        std::printf("\n[8] alias de noms\n");
+        if (!db.hasAliases()) {
+            std::printf("    absents de cet export — recherche sur le titre seul\n");
+        } else {
+            const auto aliases = db.aliasesByGame();
+
+            QHash<QString, QString> searchKeyByGame, searchKeyByTitle;
+            for (const auto &game : games) {
+                searchKeyByGame.insert(game.gameKey, game.searchKey);
+                searchKeyByTitle.insert(game.title, game.searchKey);
+            }
+
+            long long total = 0;
+            int malformes = 0, orphelins = 0, redondants = 0, verifies = 0, divergents = 0;
+            for (auto it = aliases.cbegin(); it != aliases.cend(); ++it) {
+                const auto own = searchKeyByGame.constFind(it.key());
+                if (own == searchKeyByGame.cend())
+                    ++orphelins;
+                for (const auto &alias : it.value()) {
+                    ++total;
+                    // FORME de la clé, et non sa normalisation : le §0 interdit à l'appareil
+                    // de normaliser quoi que ce soit, donc on ne peut pas la recalculer. Ce
+                    // qu'on peut faire, c'est constater qu'elle a bien la forme d'une clé.
+                    if (alias.key != alias.key.toLower() || alias.key.trimmed() != alias.key
+                        || alias.key.contains(QStringLiteral("  ")))
+                        ++malformes;
+                    // Un alias qui normalise comme le titre de SON jeu ne peut jamais
+                    // changer un résultat, et afficherait « trouvé par : <le titre> ».
+                    if (own != searchKeyByGame.cend() && alias.key == *own)
+                        ++redondants;
+                    // LE contrôle du critère 3, dans la seule forme qui soit à notre
+                    // portée : quand un alias porte le titre exact d'un jeu du catalogue,
+                    // sa clé doit être celle de ce jeu. Deux normalisations divergentes se
+                    // verraient ici, et nulle part ailleurs.
+                    const auto same = searchKeyByTitle.constFind(alias.name);
+                    if (same != searchKeyByTitle.cend()) {
+                        ++verifies;
+                        if (alias.key != *same)
+                            ++divergents;
+                    }
+                }
+            }
+
+            std::printf("    %lld alias sur %lld jeux (%.1f %% du catalogue)\n", total,
+                        static_cast<long long>(aliases.size()),
+                        games.isEmpty() ? 0.0 : 100.0 * aliases.size() / games.size());
+            std::printf("    clés recoupées avec un titre du catalogue : %d/%d concordantes\n",
+                        verifies - divergents, verifies);
+
+            if (malformes > 0 || orphelins > 0 || divergents > 0) {
+                // Chacun de ces trois cas casse la recherche SANS lever d'erreur : une clé
+                // mal formée ne peut jamais mordre, un orphelin ne désigne aucun jeu, et
+                // une clé divergente échouerait précisément sur les jeux qu'elle vise.
+                std::fprintf(stderr,
+                             "✗ alias : %d clés mal formées · %d jeux orphelins · "
+                             "%d clés divergentes\n",
+                             malformes, orphelins, divergents);
+                return 1;
+            }
+            if (redondants > 0)
+                std::fprintf(stderr,
+                             "⚠ %d alias identiques au titre de leur propre jeu : ils ne "
+                             "peuvent rien changer, et s'afficheraient comme une redite\n",
+                             redondants);
+        }
         if (scoreSurNonEmulable > 0) {
             // emu_score est un taux de fidélité d'ÉMULATION : sur une plateforme qu'on
             // n'émule pas, TOUTE valeur est un mensonge, y compris 0.
@@ -847,6 +914,21 @@ int main(int argc, char *argv[])
         } else {
             std::printf("langues : absentes de cet export (%s) — badges et filtres de "
                         "langue désactivés\n",
+                        qPrintable(catalogue.meta().schemaVersion));
+        }
+
+        // Alias de noms — export 1.8.0. Sans eux, chercher « lttp » ou « ff7 » ne donne
+        // rien : le catalogue ne connaît qu'un seul nom par jeu.
+        if (catalogue.hasAliases()) {
+            const auto aliases = catalogue.aliasesByGame();
+            games.setAliases(aliases);
+            long long total = 0;
+            for (const auto &list : aliases)
+                total += list.size();
+            std::printf("alias : %lld sur %lld jeux\n", total,
+                        static_cast<long long>(aliases.size()));
+        } else {
+            std::printf("alias : absents de cet export (%s) — recherche sur le titre seul\n",
                         qPrintable(catalogue.meta().schemaVersion));
         }
 

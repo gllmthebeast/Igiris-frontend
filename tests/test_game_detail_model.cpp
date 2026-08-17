@@ -151,6 +151,7 @@ private slots:
     // --- export 1.7.0 : catalogue élargi ---
     void catalogLanguages_excludeThoseAlreadyProvidedByARom();
     void nonEmulablePlatforms_areKeptToExplainAnEmptyList();
+    void defaultChoice_ignoresAnElectedButNonEmulablePlatform();
 };
 
 // Ajoute les colonnes des 1.5.0 / 1.6.0 à l'export de test. `artwork` vide simule les
@@ -192,6 +193,61 @@ bool addFiches(const QString &path, const QString &artwork)
     return ok;
 }
 } // namespace
+
+void TestGameDetailModel::defaultChoice_ignoresAnElectedButNonEmulablePlatform()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath("games.db");
+    QVERIFY(buildExport(path));
+
+    // La plateforme NON ÉMULABLE devient l'élue des votes, et la seule.
+    //
+    // Ce cas était structurellement impossible avant l'export 1.7.0 : ces plateformes
+    // n'étaient pas exportées du tout. Il concerne aujourd'hui 38 des 69 lignes élues.
+    // « La communauté a tranché » et « c'est lançable ici » ont cessé de coïncider.
+    sqlite3 *raw = nullptr;
+    QVERIFY(sqlite3_open(path.toUtf8().constData(), &raw) == SQLITE_OK);
+    QVERIFY(sqlite3_exec(raw,
+                         "UPDATE exp_game_platform SET is_preferred = 0;"
+                         "UPDATE exp_game_platform SET is_preferred = 1"
+                         " WHERE batocera_system IS NULL;",
+                         nullptr, nullptr, nullptr)
+            == SQLITE_OK);
+    sqlite3_close(raw);
+
+    ExportDatabase db;
+    QVERIFY(db.open(path, nullptr));
+
+    GameDetailModel model;
+    model.setCatalogue(&db);
+    model.setLocalSystems({ { QStringLiteral("snes"), system("snes", "Super Nintendo") },
+                            { QStringLiteral("psx"), system("psx", "PlayStation") } });
+    model.setOwnedRoms({ { ownedKey(QStringLiteral("igdb-1"), QStringLiteral("psx")),
+                           QStringLiteral("/roms/psx/mmx3.chd") } });
+    model.setGame(QStringLiteral("igdb-1"));
+
+    // L'élue n'apparaît nulle part dans la liste : elle n'est pas lançable, et cette liste
+    // ne parle que de lançable.
+    QVERIFY(model.rowCount() > 0);
+    for (int row = 0; row < model.rowCount(); ++row) {
+        QVERIFY(!model.data(model.index(row, 0),
+                            GameDetailModel::PreferredRole).toBool());
+    }
+
+    // Et le défaut reste le premier système JOUABLE. Proposer par défaut un système que
+    // l'appareil ne peut pas lancer serait proposer le seul geste que la fiche interdit.
+    int defaultRow = -1;
+    for (int row = 0; row < model.rowCount(); ++row) {
+        if (model.data(model.index(row, 0), GameDetailModel::DefaultChoiceRole).toBool())
+            defaultRow = row;
+    }
+    QVERIFY(defaultRow >= 0);
+    QCOMPARE(model.data(model.index(defaultRow, 0),
+                        GameDetailModel::PlatformKeyRole).toString(),
+             QStringLiteral("psx"));
+    QCOMPARE(model.data(model.index(defaultRow, 0), GameDetailModel::StatusRole).toInt(),
+             static_cast<int>(GameDetailModel::Green));
+}
 
 void TestGameDetailModel::catalogLanguages_excludeThoseAlreadyProvidedByARom()
 {

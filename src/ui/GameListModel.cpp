@@ -48,6 +48,7 @@ void GameListModel::setCatalogue(QList<catalog::Game>        games,
         m_games.append(std::move(entry));
     }
     applyLanguageMasks();
+    applyAliases();
     endResetModel();
 
     m_availablePlatforms = QStringList(platforms.cbegin(), platforms.cend());
@@ -114,6 +115,25 @@ void GameListModel::setOwnedLanguageMasks(QHash<QString, quint64> maskByGame)
         emit ownedLanguagesAvailableChanged();
     }
     rebuild();
+}
+
+void GameListModel::setAliases(QHash<QString, QList<catalog::GameAlias>> aliasesByGame)
+{
+    m_aliasesByGame = std::move(aliasesByGame);
+
+    beginResetModel();
+    applyAliases();
+    endResetModel();
+
+    rebuild();
+}
+
+void GameListModel::applyAliases()
+{
+    for (Entry &entry : m_games) {
+        entry.aliases      = m_aliasesByGame.value(entry.game.gameKey);
+        entry.matchedAlias = -1;
+    }
 }
 
 void GameListModel::applyLanguageMasks()
@@ -294,9 +314,35 @@ void GameListModel::clearFilters()
 bool GameListModel::matches(const Entry &entry) const
 {
     // Recherche : sur search_key, le nom normalisé côté serveur — jamais sur le titre (§3).
+    entry.matchedAlias = -1;
     const QString needle = m_filter.trimmed().toLower();
-    if (!needle.isEmpty() && !entry.game.searchKey.contains(needle))
-        return false;
+    if (!needle.isEmpty() && !entry.game.searchKey.contains(needle)) {
+        // Le titre ne mord pas : les AUTRES noms du jeu ont leur chance (export 1.8.0).
+        //
+        // Testés seulement ici, donc le cas courant — un titre qui correspond — ne coûte
+        // rien de plus. Les clés sont normalisées par le serveur avec exactement la même
+        // fonction que search_key : l'appareil ne normalise rien (§0).
+        // L'alias EXACT l'emporte sur celui qui contient seulement la saisie. Un jeu porte
+        // souvent « LTTP » et « TLoZ: ALttP » : taper « lttp » doit montrer le premier,
+        // pas celui qui l'englobe par hasard.
+        int found = -1;
+        for (int i = 0; i < entry.aliases.size(); ++i) {
+            if (!entry.aliases.at(i).key.contains(needle))
+                continue;
+            if (entry.aliases.at(i).key == needle) {
+                found = i;
+                break;
+            }
+            if (found < 0)
+                found = i;
+        }
+        if (found < 0)
+            return false;
+        // Mémorisé pour que la ligne puisse DIRE pourquoi elle est là. Une ligne trouvée
+        // par « lttp » n'affiche aucun des caractères tapés dans son titre : sans cette
+        // explication, la recherche a l'air de renvoyer n'importe quoi.
+        entry.matchedAlias = found;
+    }
 
     if (!m_platformFilter.isEmpty() && !entry.platformKeys.contains(m_platformFilter))
         return false;
@@ -442,6 +488,12 @@ QVariant GameListModel::data(const QModelIndex &index, int role) const
         }
         return badges;
     }
+    case MatchedAliasRole:
+        // Vide quand c'est le titre qui a mordu : la ligne n'a alors rien à expliquer, et
+        // afficher un alias là serait du bruit.
+        return entry.matchedAlias >= 0 && entry.matchedAlias < entry.aliases.size()
+                   ? entry.aliases.at(entry.matchedAlias).name
+                   : QString();
     case ExtraLanguageCountRole: {
         const int total = static_cast<int>(orderedLanguageBits(entry).size());
         return total > kMaxBadges ? total - kMaxBadges : 0;
@@ -462,6 +514,7 @@ QHash<int, QByteArray> GameListModel::roleNames() const
         { CoverRole, "coverRef" },
         { LanguagesRole, "languages" },
         { ExtraLanguageCountRole, "extraLanguages" },
+        { MatchedAliasRole, "matchedAlias" },
     };
 }
 

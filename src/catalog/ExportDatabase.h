@@ -193,6 +193,20 @@ struct GameMode {
     quint64 bit() const { return hasBit() ? (quint64(1) << bitIndex) : 0; }
 };
 
+// Un autre nom du même jeu — export 1.8.0.
+//
+// `key` est NORMALISÉ par le serveur, avec exactement la même fonction que
+// `Game::searchKey` : c'est ce qui rend la recherche possible sans que l'appareil
+// normalise quoi que ce soit (§0). `name` est le nom lisible, et il n'existe que pour être
+// AFFICHÉ — sans lui, une ligne trouvée par « lttp » n'aurait aucun moyen de dire pourquoi.
+//
+// Les deux voyagent dans la même structure, et c'est délibéré : deux listes parallèles à
+// tenir alignées rejoueraient le décalage silencieux qui a déjà frappé ce contrat deux fois.
+struct GameAlias {
+    QString key;  // pour la RECHERCHE, jamais affiché
+    QString name; // pour l'AFFICHAGE, jamais comparé
+};
+
 // Quelle ROM apporte quelle langue (§8). Même granularité que exp_rom_hash : c'est ce qui
 // permet de décider illuminé / grisé sans rien recalculer.
 struct GameLanguage {
@@ -309,6 +323,17 @@ public:
     // TITRE, pas de la ROM. C'est ce qui le distingue d'une langue, qui varie d'une release
     // à l'autre — donc un seul filtre ici, là où la langue en a deux.
 
+    // --- alias de noms — export 1.8.0 ----------------------------------------------------
+
+    bool hasAliases() const { return m_hasAliases; }
+
+    // TOUS les alias, groupés par jeu. Chargé une fois au démarrage, comme les autres index
+    // statiques : la recherche du §6 doit rester interactive à la manette, donc elle ne
+    // touche pas au disque.
+    //
+    // 18 839 alias sur 9 212 jeux dans l'export 1.8.0 — soit un jeu sur deux.
+    QHash<QString, QList<GameAlias>> aliasesByGame() const;
+
 private:
     bool readMeta(QString *error);
     bool detectLanguageTables() const;
@@ -342,6 +367,7 @@ private:
     bool       m_hasReleaseYear = false;
     bool       m_hasModes       = false;
     bool       m_hasCatalogLanguages = false;
+    bool       m_hasAliases          = false;
 };
 
 } // namespace igiris::catalog

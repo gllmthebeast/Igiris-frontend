@@ -304,6 +304,7 @@ Window {
             required property string coverRef
             required property var languages
             required property int extraLanguages
+            required property string matchedAlias
             required property int index
 
             width: ListView.view.width
@@ -333,7 +334,17 @@ Window {
                     rightMargin: 24
                     verticalCenter: parent.verticalCenter
                 }
-                text: parent.title
+                // Le titre, suivi de l'ALIAS qui a produit ce résultat quand ce n'est pas
+                // le titre qui a mordu (export 1.8.0).
+                //
+                // Sans ça, taper « lttp » fait apparaître « The Legend of Zelda: A Link to
+                // the Past » — un titre qui ne contient aucun des caractères tapés. À
+                // l'écran, ça ne se distingue pas d'une recherche qui renvoie n'importe
+                // quoi. Le §6 veut une liste dense : d'où une mention discrète sur la même
+                // ligne, et non une seconde ligne qui changerait la hauteur des lignes.
+                text: parent.matchedAlias.length > 0
+                      ? parent.title + "  ·  " + parent.matchedAlias
+                      : parent.title
                 color: theme.text
                 font.pixelSize: 22
                 elide: Text.ElideRight

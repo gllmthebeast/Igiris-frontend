@@ -133,6 +133,8 @@ bool ExportDatabase::open(const QString &path, QString *error)
     // détecter que la colonne elle-même.
     m_hasCatalogLanguages =
         hasColumn(QStringLiteral("exp_game"), QStringLiteral("lang_catalog_mask"));
+    // Alias de noms (1.7.0 → 1.8.0). Détecté sur la table, comme les langues.
+    m_hasAliases = hasTable(m_db, QStringLiteral("exp_game_alias"));
 
     if (m_meta.major != schema::kSupportedMajor) {
         const QString message =
@@ -674,6 +676,35 @@ QList<GameLanguage> ExportDatabase::languagesForGame(const QString &gameKey) con
     }
     sqlite3_finalize(stmt);
     return languages;
+}
+
+QHash<QString, QList<GameAlias>> ExportDatabase::aliasesByGame() const
+{
+    QHash<QString, QList<GameAlias>> aliases;
+    if (!m_db || !m_hasAliases)
+        return aliases;
+
+    // Un seul parcours, groupé à la lecture : 18 839 lignes, c'est un balayage de table et
+    // non 9 212 requêtes. L'ORDER BY rend l'ordre d'affichage STABLE d'un démarrage à
+    // l'autre — sans lui, il dépendrait de l'ordre de stockage, donc de l'export.
+    sqlite3_stmt *stmt =
+        prepare(m_db, QStringLiteral("SELECT game_key, alias_key, alias_name "
+                                     "FROM exp_game_alias ORDER BY game_key, alias_key"));
+    if (!stmt)
+        return aliases;
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        GameAlias alias;
+        alias.key  = columnText(stmt, 1);
+        alias.name = columnText(stmt, 2);
+        // Une clé vide ne pourrait rien retrouver, un nom vide ne pourrait rien expliquer.
+        // Le contrat les interdit ; on ne les charge pas pour autant.
+        if (alias.key.isEmpty() || alias.name.isEmpty())
+            continue;
+        aliases[columnText(stmt, 0)].append(alias);
+    }
+    sqlite3_finalize(stmt);
+    return aliases;
 }
 
 QList<GameMode> ExportDatabase::gameModes() const
