@@ -197,6 +197,14 @@ public:
     // Libellé de l'entrée de menu, propre à l'hôte — « Paramètres Batocera ». Vide quand la
     // capacité n'est pas déclarée.
     virtual QString hostSettingsLabel() const { return {}; }
+
+    // COMMENT on revient, dit dans les mots de l'hôte. Vide s'il n'y a rien à expliquer.
+    //
+    // Ce n'est pas du confort : sur certaines distributions, l'entrée de menu qui ramène
+    // ici ne s'appelle pas « quitter » et personne ne peut le deviner. Une porte de sortie
+    // qu'il faut chercher n'est pas une porte de sortie — la leçon vient du bouton
+    // lui-même, resté invisible une version durant.
+    virtual QString hostSettingsReturnHint() const { return {}; }
 };
 
 } // namespace igiris::platform

@@ -36,6 +36,14 @@ public:
     LaunchCommand hostSettingsCommand() const override;
     bool          openHostSettings(QString *error) const override;
     QString       hostSettingsLabel() const override;
+    QString       hostSettingsReturnHint() const override;
+
+private:
+    // Rendre EmulationStation quittable, le temps d'une visite. Voir le commentaire dans
+    // le .cpp : son lanceur boucle, et sans ça l'utilisateur ne revient jamais ici.
+    void disarmSettingsLoop() const;
+
+public:
 
     LaunchCommand buildLaunchCommand(const SystemEntry &system, const QString &romPath,
                                      const LaunchDetails &details) const override;

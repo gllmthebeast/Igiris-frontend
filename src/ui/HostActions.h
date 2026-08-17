@@ -36,6 +36,9 @@ class HostActions : public QObject
     Q_PROPERTY(QString settingsLabel READ settingsLabel NOTIFY adapterChanged)
     // Pourquoi c'est indisponible, en clair. Vide quand ça l'est.
     Q_PROPERTY(QString unavailableReason READ unavailableReason NOTIFY adapterChanged)
+    // Comment REVENIR ici depuis les réglages, dans les mots de l'hôte. Affiché au moment
+    // où on lui rend l'écran — c'est le seul instant où ça sert.
+    Q_PROPERTY(QString returnHint READ returnHint NOTIFY adapterChanged)
 
 public:
     explicit HostActions(QObject *parent = nullptr);
@@ -45,6 +48,7 @@ public:
     bool    settingsAvailable() const;
     QString settingsLabel() const;
     QString unavailableReason() const;
+    QString returnHint() const;
 
     // Rend l'écran à l'interface de réglages de l'hôte. Retourne un message d'erreur
     // COMPLET, vide en cas de succès (§15) — même convention que le lancement d'un jeu.

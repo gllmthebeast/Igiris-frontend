@@ -509,6 +509,46 @@ leçon vaut au-delà d'elle : un geste de secours ne se cherche pas.
 Ce bouton suppose que l'application **tourne**. Quand elle ne tourne pas, c'est le lanceur
 du §7.2 qui prend le relais — les deux ensemble couvrent le sujet, aucun ne suffit seul.
 
+#### ⚠️ Le lanceur de l'hôte BOUCLE — et sans ça on n'en revient pas
+
+`emulationstation-standalone` n'est **pas** le binaire : c'est un script bash qui relance
+EmulationStation en boucle, lu dans l'image 43.1 :
+
+```sh
+touch "${REBOOT_FLAG}"
+while [ -e "${REBOOT_FLAG}" ]; do
+    dbus-run-session -- emulationstation …
+    [ -e /tmp/shutdown.please ] || [ -e /tmp/reboot.please ] && break
+done
+```
+
+Il existe pour rendre l'écran d'accueil **inquittable** : quoi qu'on choisisse dans son menu,
+il le relance. **Ses deux seules sorties sont l'extinction et le redémarrage.**
+
+Le lancer tel quel enferme l'utilisateur — il retrouve ses réglages et perd notre interface.
+C'est exactement ce qui est arrivé au premier essai sur appareil, en 1.9.1.
+
+**Le désarmement fait donc partie de l'ouverture.** Le wrapper expose lui-même de quoi le
+faire, c'est son propre mécanisme :
+
+```sh
+if [ "$1" = "--stop-rebooting" ]; then rm -f "${REBOOT_FLAG}"; exit 0; fi
+```
+
+Pas de course : le wrapper pose son drapeau dans ses premières millisecondes et ne le
+**relit qu'après** la fermeture d'ES. On a toute la session pour le retirer ; le délai de 3 s
+laisse simplement passer le `touch`. Vérifié sur une réplique de la boucle — sans
+désarmement elle tourne indéfiniment, avec lui elle rend la main **au premier retour**.
+
+On garde malgré tout le wrapper plutôt que le binaire nu : il pose `HOME`, la langue, le
+répertoire courant, attend le compositeur et enveloppe dans `dbus-run-session`. Refaire tout
+ça serait précisément la connaissance de distribution que le §1 veut voir rester chez l'hôte.
+
+**Et le chemin du retour se DIT.** L'entrée de menu qui ramène ici s'appelle « Redémarrer
+EmulationStation », ce que personne ne devinerait. L'adaptateur fournit la phrase exacte
+(`hostSettingsReturnHint()`), affichée au moment où on rend l'écran — le seul instant où
+elle sert.
+
 ### 7.2 — La porte de sortie, au démarrage
 
 **Si le frontend ne démarre pas, l'utilisateur n'a plus aucune interface.** Écran noir,

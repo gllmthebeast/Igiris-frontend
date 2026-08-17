@@ -79,6 +79,7 @@ private slots:
     void hostSettings_declaredOnlyWhenTheBinaryIsThere();
     void hostSettings_labelNamesTheHost();
     void hostSettings_refusesClearlyWhenAbsent();
+    void hostSettings_tellTheUserHowToComeBack();
 
     // ------------------------------------------------------- (4) lancement
     void launch_reallyRunsTheCommand();
@@ -449,6 +450,24 @@ void TestPlatformAdapter::hostSettings_refusesClearlyWhenAbsent()
     QVERIFY(!adapter.openHostSettings(&error));
     QVERIFY(!error.isEmpty());
     QVERIFY(error.contains(QStringLiteral("introuvable")));
+}
+
+void TestPlatformAdapter::hostSettings_tellTheUserHowToComeBack()
+{
+    QTemporaryDir dir;
+    QDir(dir.path()).mkpath(QStringLiteral("usr/share/batocera"));
+    BatoceraAdapter adapter(dir.path());
+
+    // L'écran d'accueil de l'hôte se pose PAR-DESSUS le nôtre, et l'entrée de menu qui
+    // ramène ici ne s'appelle pas « quitter ». Au premier essai sur appareil, l'utilisateur
+    // s'est retrouvé enfermé dans les réglages sans autre issue qu'un redémarrage.
+    //
+    // Le chemin du retour doit donc être DIT, dans les mots exacts du menu de l'hôte — et
+    // il vient de l'adaptateur, seul endroit qui a le droit de les connaître (§1).
+    const QString hint = adapter.hostSettingsReturnHint();
+    QVERIFY(!hint.isEmpty());
+    QVERIFY(hint.contains(QStringLiteral("Redémarrer EmulationStation")));
+    QVERIFY(hint.contains(adapter.displayName()));
 }
 
 QTEST_GUILESS_MAIN(TestPlatformAdapter)

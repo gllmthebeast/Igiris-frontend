@@ -7,6 +7,7 @@
 #include <QFileInfo>
 #include <QProcess>
 #include <QStandardPaths>
+#include <QTimer>
 
 namespace igiris::platform {
 
@@ -100,10 +101,26 @@ LaunchCommand BatoceraAdapter::hostSettingsCommand() const
     // manettes, wifi, bluetooth, audio, résolution, mise à jour. On le relance tel quel
     // plutôt que de refaire ce qu'il fait déjà (§0, §12).
     //
-    // Plusieurs noms possibles selon la version : c'est celui de la chaîne de démarrage qui
-    // fait foi, et l'installateur le repère déjà par le même nom. On teste leur PRÉSENCE au
-    // lieu de supposer — un chemin codé en dur a déjà changé plusieurs fois chez cet hôte,
-    // ce que le §1 rappelle explicitement.
+    // ⚠️ « emulationstation-standalone » N'EST PAS le binaire : c'est un script bash qui
+    // BOUCLE, lu dans l'image 43.1 :
+    //
+    //     touch "${REBOOT_FLAG}"
+    //     while [ -e "${REBOOT_FLAG}" ]; do
+    //         dbus-run-session -- emulationstation …
+    //         [ -e /tmp/shutdown.please ] || [ -e /tmp/reboot.please ] && break
+    //     done
+    //
+    // Il existe pour rendre EmulationStation INQUITTABLE : quoi qu'on choisisse dans son
+    // menu, il le relance. Ses deux seules sorties sont l'extinction et le redémarrage.
+    //
+    // Le lancer tel quel enferme donc l'utilisateur : il retrouve ses réglages, mais plus
+    // jamais notre interface. C'est ce qui est arrivé au premier essai sur appareil, et
+    // c'est pourquoi le désarmement de sa boucle fait partie de l'ouverture (openHostSettings).
+    //
+    // On garde malgré tout le wrapper plutôt que le binaire nu : il pose HOME, la langue,
+    // le répertoire courant, attend le compositeur et enveloppe dans dbus-run-session.
+    // Refaire tout ça ici serait précisément la connaissance de distribution que le §1
+    // veut voir rester chez l'hôte.
     static const char *const candidates[] = {
         "emulationstation-standalone",
         "emulationstation",
@@ -131,6 +148,16 @@ LaunchCommand BatoceraAdapter::hostSettingsCommand() const
 QString BatoceraAdapter::hostSettingsLabel() const
 {
     return QStringLiteral("Paramètres %1").arg(displayName());
+}
+
+QString BatoceraAdapter::hostSettingsReturnHint() const
+{
+    // Le libellé exact du menu de l'hôte, qu'on ne peut pas renommer et que personne ne
+    // devinerait : « Redémarrer EmulationStation » est ce qui RAMÈNE ICI, une fois sa
+    // boucle désarmée. « Redémarrer le système » marche aussi, mais redémarre la machine.
+    return QStringLiteral("Pour revenir ici : menu de %1 → Quitter → "
+                          "« Redémarrer EmulationStation ».")
+        .arg(displayName());
 }
 
 bool BatoceraAdapter::openHostSettings(QString *error) const
@@ -162,9 +189,36 @@ bool BatoceraAdapter::openHostSettings(QString *error) const
         return setError(QStringLiteral("échec de l'ouverture de « %1 » : %2")
                             .arg(command.program, process.errorString()));
 
+    disarmSettingsLoop();
+
     if (error)
         error->clear();
     return true;
+}
+
+void BatoceraAdapter::disarmSettingsLoop() const
+{
+    // DÉSARMER la boucle du wrapper, sans quoi l'utilisateur ne revient jamais ici.
+    //
+    // Le wrapper expose lui-même de quoi le faire — c'est son propre mécanisme, pas une
+    // ruse de notre part :
+    //
+    //     if [ "$1" = "--stop-rebooting" ]; then rm -f "${REBOOT_FLAG}"; exit 0; fi
+    //
+    // Pas de course à craindre : le wrapper pose son drapeau dans ses premières
+    // millisecondes, et ne le RELIT qu'après la fermeture d'EmulationStation. On a donc
+    // toute la session pour le retirer. Le délai laisse simplement passer le `touch`.
+    //
+    // Ensuite, quitter EmulationStation par « Redémarrer EmulationStation » le fait sortir,
+    // la boucle constate l'absence du drapeau, le wrapper se termine — et notre fenêtre est
+    // toujours là, dessous.
+    const LaunchCommand command = hostSettingsCommand();
+    if (!command.isValid() || !command.program.endsWith(QLatin1String("-standalone")))
+        return; // binaire nu : pas de boucle à désarmer
+
+    QTimer::singleShot(3000, [program = command.program]() {
+        QProcess::startDetached(program, { QStringLiteral("--stop-rebooting") });
+    });
 }
 
 QString BatoceraAdapter::systemsFilePath() const

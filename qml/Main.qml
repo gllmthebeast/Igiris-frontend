@@ -184,7 +184,17 @@ Window {
         // Verbatim (§15) : c'est le seul message que verra quelqu'un devant une machine
         // qu'il ne peut plus configurer.
         var message = host.openSettings()
-        hostMessage.text = message.length > 0 ? message : ""
+        if (message.length > 0) {
+            hostMessage.text = message
+            return
+        }
+        // Succès : on affiche COMMENT REVENIR, et c'est le seul moment où ça sert.
+        //
+        // L'écran d'accueil de l'hôte va se poser par-dessus le nôtre ; l'entrée de menu
+        // qui ramène ici ne s'appelle pas « quitter » et personne ne la devinerait. Au
+        // premier essai sur appareil, l'utilisateur s'est retrouvé enfermé dans les
+        // réglages, sans autre issue qu'un redémarrage.
+        hostMessage.text = host.returnHint
     }
 
     // ------------------------------------------------------------------ filtres

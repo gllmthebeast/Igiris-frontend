@@ -38,6 +38,11 @@ QString HostActions::unavailableReason() const
     return tr("interface de réglages introuvable");
 }
 
+QString HostActions::returnHint() const
+{
+    return m_adapter ? m_adapter->hostSettingsReturnHint() : QString();
+}
+
 QString HostActions::openSettings()
 {
     if (!m_adapter)
