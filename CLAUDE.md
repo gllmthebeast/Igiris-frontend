@@ -496,6 +496,19 @@ Le nom du binaire, sa localisation et le libellé viennent tous de l'adaptateur.
 `HostSettings` n'est déclarée que si le binaire est **réellement présent** : sinon l'entrée
 reste visible mais grisée, avec la raison — une entrée qui ne fait rien serait pire.
 
+**Où elle est, et pourquoi c'est là.** En haut à droite de la barre de recherche, encadrée,
+avec son raccourci **F1** écrit à côté — et joignable par ce raccourci depuis n'importe où,
+sans navigation.
+
+Elle était d'abord en bout de rangée de filtres. Elle y ressemblait à un filtre, se repliait
+sur une seconde ligne, et demandait de traverser six cellules pour l'atteindre : **elle est
+passée inaperçue, et il a fallu la redemander alors qu'elle venait d'être livrée.** C'est la
+seule fonctionnalité de ce projet dont l'emplacement ait dû être corrigé après coup, et la
+leçon vaut au-delà d'elle : un geste de secours ne se cherche pas.
+
+Ce bouton suppose que l'application **tourne**. Quand elle ne tourne pas, c'est le lanceur
+du §7.2 qui prend le relais — les deux ensemble couvrent le sujet, aucun ne suffit seul.
+
 ### 7.2 — La porte de sortie, au démarrage
 
 **Si le frontend ne démarre pas, l'utilisateur n'a plus aucune interface.** Écran noir,

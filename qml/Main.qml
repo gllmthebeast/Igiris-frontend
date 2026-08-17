@@ -49,7 +49,9 @@ Window {
             anchors {
                 fill: parent
                 leftMargin: 24
-                rightMargin: 260
+                // Réservé pour le compteur, la version ET le bouton des réglages, qui
+                // vivent tous dans la barre du haut.
+                rightMargin: 520
                 topMargin: 12
                 bottomMargin: 12
             }
@@ -100,7 +102,89 @@ Window {
                 opacity: 0.7
                 text: "v" + appVersion
             }
+
+            // ------------------------------------------------- réglages de l'hôte
+            //
+            // EN HAUT À DROITE, et non parmi les filtres où il était en 1.9.0 : là-bas il
+            // ressemblait à un filtre, se repliait sur une seconde ligne, et il fallait
+            // traverser six cellules pour l'atteindre. Il est passé inaperçu — c'est la
+            // seule chose qu'on ait eu à redemander après l'avoir livrée.
+            //
+            // Un accès à la configuration ne se cherche pas : sans lui, la machine n'a plus
+            // ni manettes, ni wifi, ni mise à jour (§7.1).
+            Item {
+                id: settingsCell
+
+                anchors.verticalCenter: parent.verticalCenter
+                width: settingsRow.implicitWidth + 32
+                height: 42
+                activeFocusOnTab: true
+
+                Rectangle {
+                    anchors.fill: parent
+                    radius: 6
+                    // Toujours dessiné, jamais transparent : un bouton qui n'apparaît qu'au
+                    // focus n'existe pas pour qui ne sait pas qu'il faut le chercher.
+                    color: settingsCell.activeFocus ? theme.selection : "#242430"
+                    border.width: 1
+                    border.color: settingsCell.activeFocus ? theme.selection : "#3a3a4a"
+                }
+
+                Row {
+                    id: settingsRow
+                    anchors.centerIn: parent
+                    spacing: 8
+
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        // Dessiné, pas un emoji : la police de l'appareil cible n'en a pas
+                        // forcément, et un carré vide ne veut rien dire (même règle qu'en
+                        // §7 pour le code couleur).
+                        text: "\u2699"
+                        color: host.settingsAvailable ? theme.text : theme.dim
+                        font.pixelSize: 18
+                    }
+
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: host.settingsLabel
+                        color: host.settingsAvailable ? theme.text : theme.dim
+                        font.pixelSize: 17
+                    }
+
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        // Le raccourci est ANNONCÉ : c'est ce qui le rend utilisable sans
+                        // l'avoir lu dans une note de version.
+                        text: host.settingsAvailable ? "F1" : "—"
+                        color: theme.dim
+                        font.pixelSize: 13
+                    }
+                }
+
+                Keys.onReturnPressed: root.openHostSettings()
+                Keys.onEnterPressed: root.openHostSettings()
+            }
         }
+    }
+
+    // Atteignable de PARTOUT, sans navigation : depuis la liste, depuis la recherche,
+    // depuis une fiche. C'est le geste de secours de l'utilisateur — il ne doit dépendre
+    // d'aucun parcours.
+    Shortcut {
+        sequences: ["F1", StandardKey.Preferences]
+        onActivated: root.openHostSettings()
+    }
+
+    function openHostSettings() {
+        if (!host.settingsAvailable) {
+            hostMessage.text = qsTr("Réglages indisponibles : %1").arg(host.unavailableReason)
+            return
+        }
+        // Verbatim (§15) : c'est le seul message que verra quelqu'un devant une machine
+        // qu'il ne peut plus configurer.
+        var message = host.openSettings()
+        hostMessage.text = message.length > 0 ? message : ""
     }
 
     // ------------------------------------------------------------------ filtres
@@ -260,72 +344,8 @@ Window {
                 onCurrentIndexChanged: games.modeFilter =
                     currentIndex === 0 ? [] : [games.availableModes[currentIndex - 1]]
                 KeyNavigation.left: languageModeCell
-                KeyNavigation.right: settingsCell
             }
 
-            // ------------------------------------------------------- réglages de l'hôte
-            //
-            // Remplacer l'écran d'accueil de la distribution, c'est remplacer sa SEULE
-            // interface de configuration : manettes, wifi, bluetooth, audio, résolution,
-            // mise à jour du système. Sans cette entrée, la machine devient
-            // inconfigurable — et sur une borne sans clavier, irrécupérable.
-            //
-            // On ne réimplémente rien (§0, §12) : on rend l'écran, l'autre le rend en
-            // partant. Le libellé et la commande viennent de l'adaptateur, jamais d'ici.
-            FocusScope {
-                id: settingsCell
-
-                implicitWidth: settingsRow.implicitWidth + 40
-                implicitHeight: 44
-                KeyNavigation.down: list
-                KeyNavigation.up: searchField
-                KeyNavigation.left: modeCell
-
-                Rectangle {
-                    anchors.fill: parent
-                    radius: 6
-                    color: settingsCell.activeFocus ? theme.selection : "transparent"
-                    border.width: settingsCell.activeFocus ? 0 : 1
-                    border.color: "#2a2a36"
-                }
-
-                Row {
-                    id: settingsRow
-                    anchors.centerIn: parent
-                    spacing: 10
-
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        // Grisé quand l'adaptateur ne déclare pas la capacité. Le §1 veut
-                        // qu'une distribution DISE ce qu'elle ne sait pas faire.
-                        text: host.settingsAvailable
-                              ? host.settingsLabel
-                              : host.settingsLabel + "  —  " + host.unavailableReason
-                        color: host.settingsAvailable ? theme.text : theme.dim
-                        font.pixelSize: 18
-                    }
-
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        visible: settingsCell.activeFocus && host.settingsAvailable
-                        text: "⏎"
-                        color: theme.dim
-                        font.pixelSize: 17
-                    }
-                }
-
-                function open() {
-                    if (!host.settingsAvailable)
-                        return
-                    // Verbatim (§15) : c'est le seul message que verra quelqu'un devant
-                    // une machine qu'il ne peut plus configurer.
-                    var message = host.openSettings()
-                    hostMessage.text = message.length > 0 ? message : ""
-                }
-
-                Keys.onReturnPressed: open()
-                Keys.onEnterPressed: open()
-            }
         }
     }
 
