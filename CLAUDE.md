@@ -79,15 +79,21 @@ entièrement différent, ce qui ne se justifie qu'après validation du reste.
 ### L'adaptateur de plateforme
 
 **Décision à appliquer avant la première ligne de code.** Tout ce qui est spécifique à une
-distribution est isolé derrière une interface unique, qui expose exactement quatre choses :
+distribution est isolé derrière une interface unique, qui expose exactement **six** choses :
 
-1. localiser le fichier de description des systèmes ;
+1. fournir les systèmes déclarés (les localiser **et** lire leur format) ;
 2. résoudre une clé de plateforme du catalogue vers le nom de système local ;
 3. localiser les dossiers de ROMs ;
-4. lancer — construire et exécuter la commande, substitution de `%ROM%`.
+4. lancer — construire et exécuter la commande, substitution de `%ROM%` ;
+5. localiser l'export sur cet appareil ;
+6. **rendre la main à l'interface de réglages de l'hôte** (§7.1).
 
-Rien d'autre. Tout le reste du code — chargement du catalogue, matching par hash, calcul
-des statuts, interface QML — **ne sait pas sur quelle distribution il tourne**.
+Elles étaient quatre au départ. Les deux dernières sont arrivées après coup, et chaque
+oubli avait un coût visible : sans la cinquième, l'appareil affichait « 0 jeux » ; sans la
+sixième, la machine devenait inconfigurable. Rien d'autre.
+
+Tout le reste du code — chargement du catalogue, matching par hash, calcul des statuts,
+interface QML — **ne sait pas sur quelle distribution il tourne**.
 
 ### Règles de contrôle
 
@@ -470,6 +476,42 @@ secondaires.
 C'est également ici — et pas en vue liste — qu'on détaille **quelle release apporte quelles
 langues** : chaque entrée de système porte ses propres badges, avec la même sémantique
 illuminé/grisé que §8 mais restreinte à cette plateforme.
+
+### 7.1 — Rendre la main aux réglages de l'hôte
+
+**Remplacer l'écran d'accueil, c'est remplacer la seule interface de configuration de la
+machine.** Sur les distributions visées, les manettes, le wifi, le bluetooth, l'audio, la
+résolution et la mise à jour du système vivent tous dans l'écran d'accueil d'origine. Le
+masquer sans rien proposer rend l'appareil inconfigurable — et sur une borne sans clavier,
+irrécupérable.
+
+L'accueil porte donc une entrée **« Paramètres <hôte> »**, qui relance l'écran d'accueil
+d'origine. Il se met par-dessus, et sa fermeture nous rend l'écran : les deux sont des
+clientes du même compositeur, sur les deux chaînes de démarrage.
+
+**On ne réimplémente rien.** Le §0 interdit les addons, le §12 interdit de forker ES, et
+refaire le seul mappage de manettes serait des mois pour un résultat inférieur.
+
+Le nom du binaire, sa localisation et le libellé viennent tous de l'adaptateur. La capacité
+`HostSettings` n'est déclarée que si le binaire est **réellement présent** : sinon l'entrée
+reste visible mais grisée, avec la raison — une entrée qui ne fait rien serait pire.
+
+### 7.2 — La porte de sortie, au démarrage
+
+**Si le frontend ne démarre pas, l'utilisateur n'a plus aucune interface.** Écran noir,
+machine d'apparence morte, et rien pour aller réparer.
+
+La chaîne de démarrage n'appelle donc pas le binaire mais un **lanceur**
+(`/userdata/system/igiris/start.sh`, écrit par l'installateur) qui rend la main à l'écran
+d'accueil d'origine dès que le frontend échoue **ou s'arrête trop vite pour avoir affiché
+quoi que ce soit** — code de sortie non nul, ou moins de cinq secondes.
+
+Le seuil de durée n'est pas de la précaution : un frontend qui rend 0 en trois secondes n'a
+rien affiché, et sans ce test le repli ne se déclencherait pas. Les deux sens sont vérifiés
+— repli sur échec, et **pas** de repli sur un fonctionnement normal.
+
+Le lanceur vit dans la partition inscriptible : il se corrige à la main, sans remonter la
+racine en écriture.
 
 ---
 

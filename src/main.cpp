@@ -32,6 +32,7 @@
 #include "systems/EsSystemsParser.h"
 #include "ui/GameDetailModel.h"
 #include "ui/GameListModel.h"
+#include "ui/HostActions.h"
 #include "version.h"
 
 namespace {
@@ -834,6 +835,9 @@ int main(int argc, char *argv[])
     igiris::catalog::ExportDatabase catalogue;
     igiris::ui::GameListModel       games;
     igiris::ui::GameDetailModel     detail;
+    // Les actions qui s'adressent à l'HÔTE et non au catalogue : aujourd'hui, rendre
+    // l'écran à son interface de réglages (§1, responsabilité 6).
+    igiris::ui::HostActions         host;
     QString                         catalogueError;
 
     // L'adaptateur : détecté sur la machine, ou forcé sur une racine factice (image
@@ -1068,6 +1072,7 @@ int main(int argc, char *argv[])
     // lui qui décide du statut noir (§1, §7).
     detail.setCatalogue(&catalogue);
     detail.setAdapter(adapter.get());
+    host.setAdapter(adapter.get());
 
     // C'est l'ADAPTATEUR qui lit sa description, pas ce point d'entrée. Avant le lot 9,
     // main.cpp appelait lui-même le parser du format EmulationStation — il supposait donc
@@ -1163,6 +1168,7 @@ int main(int argc, char *argv[])
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("games"), &games);
+    engine.rootContext()->setContextProperty(QStringLiteral("host"), &host);
     engine.rootContext()->setContextProperty(QStringLiteral("detail"), &detail);
     // La version, exposée à l'interface. Sur un appareil mis à jour par scp, savoir CE QUI
     // tourne sans passer par un terminal est la première question qu'on se pose.

@@ -260,15 +260,93 @@ Window {
                 onCurrentIndexChanged: games.modeFilter =
                     currentIndex === 0 ? [] : [games.availableModes[currentIndex - 1]]
                 KeyNavigation.left: languageModeCell
+                KeyNavigation.right: settingsCell
+            }
+
+            // ------------------------------------------------------- réglages de l'hôte
+            //
+            // Remplacer l'écran d'accueil de la distribution, c'est remplacer sa SEULE
+            // interface de configuration : manettes, wifi, bluetooth, audio, résolution,
+            // mise à jour du système. Sans cette entrée, la machine devient
+            // inconfigurable — et sur une borne sans clavier, irrécupérable.
+            //
+            // On ne réimplémente rien (§0, §12) : on rend l'écran, l'autre le rend en
+            // partant. Le libellé et la commande viennent de l'adaptateur, jamais d'ici.
+            FocusScope {
+                id: settingsCell
+
+                implicitWidth: settingsRow.implicitWidth + 40
+                implicitHeight: 44
+                KeyNavigation.down: list
+                KeyNavigation.up: searchField
+                KeyNavigation.left: modeCell
+
+                Rectangle {
+                    anchors.fill: parent
+                    radius: 6
+                    color: settingsCell.activeFocus ? theme.selection : "transparent"
+                    border.width: settingsCell.activeFocus ? 0 : 1
+                    border.color: "#2a2a36"
+                }
+
+                Row {
+                    id: settingsRow
+                    anchors.centerIn: parent
+                    spacing: 10
+
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        // Grisé quand l'adaptateur ne déclare pas la capacité. Le §1 veut
+                        // qu'une distribution DISE ce qu'elle ne sait pas faire.
+                        text: host.settingsAvailable
+                              ? host.settingsLabel
+                              : host.settingsLabel + "  —  " + host.unavailableReason
+                        color: host.settingsAvailable ? theme.text : theme.dim
+                        font.pixelSize: 18
+                    }
+
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: settingsCell.activeFocus && host.settingsAvailable
+                        text: "⏎"
+                        color: theme.dim
+                        font.pixelSize: 17
+                    }
+                }
+
+                function open() {
+                    if (!host.settingsAvailable)
+                        return
+                    // Verbatim (§15) : c'est le seul message que verra quelqu'un devant
+                    // une machine qu'il ne peut plus configurer.
+                    var message = host.openSettings()
+                    hostMessage.text = message.length > 0 ? message : ""
+                }
+
+                Keys.onReturnPressed: open()
+                Keys.onEnterPressed: open()
             }
         }
+    }
+
+    // Échec de l'ouverture des réglages, dit en clair et pas avalé (§15).
+    Text {
+        id: hostMessage
+
+        anchors { top: filterBar.bottom; left: parent.left; leftMargin: 24
+                  right: parent.right; rightMargin: 24 }
+        visible: text.length > 0
+        color: "#d8a657"
+        font.pixelSize: 16
+        wrapMode: Text.WordWrap
     }
 
     // ------------------------------------------------------------------- liste
     ListView {
         id: list
 
-        anchors { top: filterBar.bottom; left: parent.left; right: parent.right; bottom: parent.bottom }
+        anchors { top: hostMessage.visible ? hostMessage.bottom : filterBar.bottom
+                  left: parent.left; right: parent.right; bottom: parent.bottom }
 
         model: games
         focus: true

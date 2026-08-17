@@ -3,19 +3,26 @@
 // L'adaptateur de plateforme — CLAUDE.md §1.
 //
 // Tout ce qui est spécifique à une distribution est isolé derrière cette interface, qui
-// expose EXACTEMENT CINQ choses :
+// expose EXACTEMENT SIX choses :
 //
 //   1. FOURNIR les systèmes déclarés (les localiser ET lire leur format)
 //   2. résoudre une platform_key du catalogue vers le nom de système local
 //   3. localiser les dossiers de ROMs
 //   4. lancer — construire et exécuter la commande, substitution de %ROM%
 //   5. localiser l'export sur cet appareil
+//   6. rendre la main à l'interface de RÉGLAGES de l'hôte
 //
 // ⚠️ La cinquième est arrivée APRÈS coup, et l'oubli avait un coût visible : sur Batocera
 // l'application affichait « 0 jeux ». L'installateur dépose l'export dans /userdata, la
 // seule partition inscriptible, tandis que main.cpp cherchait des chemins Unix génériques
 // (data/, ~/.local/share, /var/lib) dont AUCUN n'existe là-bas. Le point d'entrée devinait
 // donc un emplacement qui, lui aussi, dépend de la distribution.
+//
+// ⚠️ La sixième existe parce que remplacer l'écran d'accueil de l'hôte, c'est aussi
+// remplacer sa SEULE interface de configuration. Chez Batocera, les manettes, le wifi, le
+// bluetooth, l'audio, la résolution et la mise à jour du système vivent tous dans
+// EmulationStation : le masquer, c'est les rendre inatteignables. On ne réimplémente rien
+// — le §0 interdit les addons et le §12 interdit de forker ES — on lui rend l'écran.
 //
 // Plus la déclaration de capacités : une distribution qui ne sait pas faire quelque chose
 // le dit, et l'interface s'adapte au lieu de planter.
@@ -42,6 +49,10 @@ enum class Capability : quint32 {
     // défaut. Le §1 exige qu'une distribution DISE ce qu'elle ne sait pas faire, plutôt
     // que de laisser croire.
     ControllerMapping = 1u << 4,
+    // Sait rendre la main à l'interface de réglages de l'hôte (§1, responsabilité 6).
+    // NON déclarée quand le binaire de réglages est introuvable : mieux vaut une entrée
+    // grisée qui s'explique qu'un bouton qui ne fait rien.
+    HostSettings = 1u << 5,
 };
 Q_DECLARE_FLAGS(Capabilities, Capability)
 Q_DECLARE_OPERATORS_FOR_FLAGS(Capabilities)
@@ -165,6 +176,27 @@ public:
     //     avant les emplacements génériques, sans les remplacer — un binaire lancé depuis
     //     un dépôt doit continuer à trouver son data/games.db.
     virtual QStringList exportSearchPaths() const = 0;
+
+    // (6a) La commande qui ouvre les RÉGLAGES de l'hôte. Fonction pure, testable sans rien
+    //      exécuter — même découpage que (4a).
+    //
+    //      Commande VIDE = cette distribution ne sait pas le faire, et le dit. C'est le
+    //      défaut : une distribution dont on ignore le frontend de réglages ne doit pas
+    //      voir le projet en inventer un nom au hasard.
+    virtual LaunchCommand hostSettingsCommand() const { return {}; }
+
+    // (6b) Exécuter. `error` reçoit le message COMPLET en cas d'échec (§15).
+    virtual bool openHostSettings(QString *error) const
+    {
+        if (error)
+            *error = QStringLiteral("cette distribution n'expose pas d'interface de "
+                                    "réglages connue de ce frontend");
+        return false;
+    }
+
+    // Libellé de l'entrée de menu, propre à l'hôte — « Paramètres Batocera ». Vide quand la
+    // capacité n'est pas déclarée.
+    virtual QString hostSettingsLabel() const { return {}; }
 };
 
 } // namespace igiris::platform

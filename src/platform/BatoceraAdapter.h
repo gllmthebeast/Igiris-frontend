@@ -33,6 +33,10 @@ public:
     QStringList romDirectories() const override;
     QStringList exportSearchPaths() const override;
 
+    LaunchCommand hostSettingsCommand() const override;
+    bool          openHostSettings(QString *error) const override;
+    QString       hostSettingsLabel() const override;
+
     LaunchCommand buildLaunchCommand(const SystemEntry &system, const QString &romPath,
                                      const LaunchDetails &details) const override;
 

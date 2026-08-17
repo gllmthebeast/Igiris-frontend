@@ -10,6 +10,7 @@
 #include "platform/BatoceraAdapter.h"
 #include "platform/CommandLine.h"
 
+#include <QFile>
 #include <QDir>
 #include <QTemporaryDir>
 #include <QTest>
@@ -73,6 +74,11 @@ private slots:
 
     // ------------------------------------------------- (3) dossiers de ROMs
     void romDirectories_foundAndEmptyWhenAbsent();
+
+    // ----------------------------------------- (6) réglages de l'hôte
+    void hostSettings_declaredOnlyWhenTheBinaryIsThere();
+    void hostSettings_labelNamesTheHost();
+    void hostSettings_refusesClearlyWhenAbsent();
 
     // ------------------------------------------------------- (4) lancement
     void launch_reallyRunsTheCommand();
@@ -388,6 +394,61 @@ void TestPlatformAdapter::capabilities_areDeclared()
     QVERIFY(adapter.supports(Capability::RomDirectories));
     QVERIFY(adapter.supports(Capability::Launch));
     QCOMPARE(adapter.id(), QStringLiteral("batocera"));
+}
+
+void TestPlatformAdapter::hostSettings_declaredOnlyWhenTheBinaryIsThere()
+{
+    QTemporaryDir dir;
+    QDir(dir.path()).mkpath(QStringLiteral("usr/share/batocera"));
+    QDir(dir.path()).mkpath(QStringLiteral("usr/bin"));
+
+    BatoceraAdapter adapter(dir.path());
+
+    // Sans le binaire de réglages, la capacité n'est PAS déclarée. Une entrée de menu qui
+    // ne fait rien est pire qu'une entrée grisée qui dit pourquoi (§1).
+    QVERIFY(!adapter.supports(Capability::HostSettings));
+    QVERIFY(!adapter.hostSettingsCommand().isValid());
+
+    // Le déposer suffit à l'activer : la capacité se constate, elle ne se suppose pas.
+    const QString es = dir.filePath(QStringLiteral("usr/bin/emulationstation-standalone"));
+    QFile file(es);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("#!/bin/sh\n");
+    file.close();
+    QVERIFY(file.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+
+    QVERIFY(adapter.supports(Capability::HostSettings));
+    QCOMPARE(adapter.hostSettingsCommand().program, es);
+
+    // Et c'est bien le binaire SOUS LA RACINE de l'adaptateur, pas celui de la machine de
+    // développement : sans ça le test passerait pour de mauvaises raisons sur une machine
+    // qui aurait EmulationStation installé.
+    QVERIFY(adapter.hostSettingsCommand().program.startsWith(dir.path()));
+}
+
+void TestPlatformAdapter::hostSettings_labelNamesTheHost()
+{
+    QTemporaryDir dir;
+    QDir(dir.path()).mkpath(QStringLiteral("usr/share/batocera"));
+    BatoceraAdapter adapter(dir.path());
+
+    // Le libellé porte le nom de l'hôte, et il vient de l'adaptateur — c'est ce qui permet
+    // au reste du code de ne connaître aucune distribution (§1).
+    QVERIFY(adapter.hostSettingsLabel().contains(adapter.displayName()));
+}
+
+void TestPlatformAdapter::hostSettings_refusesClearlyWhenAbsent()
+{
+    QTemporaryDir dir;
+    QDir(dir.path()).mkpath(QStringLiteral("usr/share/batocera"));
+    BatoceraAdapter adapter(dir.path());
+
+    // Refus EXPLICITE et message complet (§15). Un échec muet laisserait l'utilisateur
+    // devant une machine qu'il ne peut plus configurer, sans savoir pourquoi.
+    QString error;
+    QVERIFY(!adapter.openHostSettings(&error));
+    QVERIFY(!error.isEmpty());
+    QVERIFY(error.contains(QStringLiteral("introuvable")));
 }
 
 QTEST_GUILESS_MAIN(TestPlatformAdapter)

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 
 # SemVer strict (CLAUDE.md §15) : cette version est la seule source de vérité.
 # Elle alimente version.h, et c'est elle qu'affiche `igiris-frontend --version`.
-project(igiris-frontend VERSION 1.8.0 LANGUAGES CXX)
+project(igiris-frontend VERSION 1.9.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -61,7 +61,8 @@ target_link_libraries(igiris-scan PUBLIC Qt6::Core igiris-catalog ZLIB::ZLIB SQL
 
 # Lot 5 — le modèle exposé à QML. Le §12 veut très peu de C++ : cette couche expose les
 # données et rien d'autre.
-add_library(igiris-ui STATIC src/ui/GameListModel.cpp src/ui/GameDetailModel.cpp)
+add_library(igiris-ui STATIC src/ui/GameListModel.cpp src/ui/GameDetailModel.cpp
+                             src/ui/HostActions.cpp)
 target_include_directories(igiris-ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(igiris-ui PUBLIC Qt6::Core igiris-catalog igiris-platform)
 

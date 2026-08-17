@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QProcess>
+#include <QStandardPaths>
 
 namespace igiris::platform {
 
@@ -82,8 +83,88 @@ QString BatoceraAdapter::displayName() const
 
 Capabilities BatoceraAdapter::capabilities() const
 {
-    return Capability::SystemsFile | Capability::RomDirectories | Capability::Launch
-         | Capability::PerSystemEmulator;
+    Capabilities caps = Capability::SystemsFile | Capability::RomDirectories
+                      | Capability::Launch | Capability::PerSystemEmulator;
+
+    // Déclarée seulement si le binaire est RÉELLEMENT là. Une entrée de menu qui ne fait
+    // rien est pire qu'une entrée grisée qui dit pourquoi (§1).
+    if (hostSettingsCommand().isValid())
+        caps |= Capability::HostSettings;
+
+    return caps;
+}
+
+LaunchCommand BatoceraAdapter::hostSettingsCommand() const
+{
+    // Le frontend d'origine, qui est AUSSI la seule interface de configuration du système :
+    // manettes, wifi, bluetooth, audio, résolution, mise à jour. On le relance tel quel
+    // plutôt que de refaire ce qu'il fait déjà (§0, §12).
+    //
+    // Plusieurs noms possibles selon la version : c'est celui de la chaîne de démarrage qui
+    // fait foi, et l'installateur le repère déjà par le même nom. On teste leur PRÉSENCE au
+    // lieu de supposer — un chemin codé en dur a déjà changé plusieurs fois chez cet hôte,
+    // ce que le §1 rappelle explicitement.
+    static const char *const candidates[] = {
+        "emulationstation-standalone",
+        "emulationstation",
+    };
+
+    for (const char *name : candidates) {
+        // D'abord sous la racine de l'adaptateur : c'est ce qui rend le cas testable sur
+        // une image montée, sans rien exécuter de la machine hôte.
+        const QString local = absolutePath(QStringLiteral("usr/bin/%1").arg(
+            QLatin1String(name)));
+        if (QFileInfo(local).isExecutable())
+            return { local, {}, {} };
+    }
+
+    // Puis le PATH, pour le cas normal d'un appareil où l'adaptateur est enraciné sur « / ».
+    for (const char *name : candidates) {
+        const QString found = QStandardPaths::findExecutable(QLatin1String(name));
+        if (!found.isEmpty())
+            return { found, {}, {} };
+    }
+
+    return {};
+}
+
+QString BatoceraAdapter::hostSettingsLabel() const
+{
+    return QStringLiteral("Paramètres %1").arg(displayName());
+}
+
+bool BatoceraAdapter::openHostSettings(QString *error) const
+{
+    const auto setError = [error](const QString &message) {
+        if (error)
+            *error = message;
+        return false;
+    };
+
+    const LaunchCommand command = hostSettingsCommand();
+    if (!command.isValid())
+        return setError(QStringLiteral("interface de réglages introuvable sur cette "
+                                       "installation : ni emulationstation-standalone ni "
+                                       "emulationstation dans /usr/bin ni dans le PATH"));
+
+    // Détaché, et SANS quitter : sur les deux chaînes de démarrage de cet hôte — labwc en
+    // Wayland, openbox en X11 — les deux applications sont des clientes du même
+    // compositeur. La seconde s'affiche par-dessus, et sa fermeture nous redonne l'écran.
+    //
+    // Se terminer soi-même serait plus simple mais irréversible : si le binaire de réglages
+    // ne démarre pas, l'utilisateur se retrouverait devant un écran vide, sans interface
+    // pour rien réparer.
+    QProcess process;
+    process.setProgram(command.program);
+    process.setArguments(command.arguments);
+
+    if (!process.startDetached())
+        return setError(QStringLiteral("échec de l'ouverture de « %1 » : %2")
+                            .arg(command.program, process.errorString()));
+
+    if (error)
+        error->clear();
+    return true;
 }
 
 QString BatoceraAdapter::systemsFilePath() const
