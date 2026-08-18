@@ -990,6 +990,21 @@ int main(int argc, char *argv[])
             }
         }
         updates.setPaths(script, dataDir);
+
+        // Le constructeur de cache de vignettes, cherché aux mêmes endroits.
+        QString covers;
+        for (const QString &candidate : scripts) {
+            const QString c = QString(candidate).replace(QStringLiteral("fetch-export.sh"),
+                                                         QStringLiteral("fetch-covers.sh"));
+            if (QFileInfo::exists(c)) {
+                covers = QFileInfo(c).absoluteFilePath();
+                break;
+            }
+        }
+        updates.setCoversScript(covers);
+        const QString coversDir = QDir(dataDir).filePath(QStringLiteral("covers"));
+        games.setCoversDirectory(coversDir);
+        detail.setCoversDirectory(coversDir);
         if (script.isEmpty())
             std::fprintf(stderr, "⚠ fetch-export.sh introuvable : mise à jour du catalogue "
                                  "indisponible depuis l'interface\n");
@@ -1045,6 +1060,7 @@ int main(int argc, char *argv[])
             std::printf("modes de jeu : absents de cet export (%s) — filtre désactivé\n",
                         qPrintable(catalogue.meta().schemaVersion));
         }
+        std::printf("vignettes locales : %d\n", games.localCoverCount());
         std::printf("catalogue : %d jeux · %lld plateformes · ouverture %lld ms · "
                     "chargement %lld ms\n",
                     games.totalCount(),

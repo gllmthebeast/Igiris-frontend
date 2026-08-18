@@ -124,6 +124,12 @@ if [ -f "$FETCH_SRC" ]; then
     cp -f "$FETCH_SRC" /userdata/system/igiris/fetch-export.sh
     chmod +x /userdata/system/igiris/fetch-export.sh
     echo "✓ outil de mise à jour installé : /userdata/system/igiris/fetch-export.sh"
+    COVERS_SRC="$(dirname "$FETCH_SRC")/fetch-covers.sh"
+    if [ -f "$COVERS_SRC" ]; then
+        cp -f "$COVERS_SRC" /userdata/system/igiris/fetch-covers.sh
+        chmod +x /userdata/system/igiris/fetch-covers.sh
+        echo "✓ cache de vignettes disponible depuis l'\''interface"
+    fi
 else
     echo "⚠ fetch-export.sh introuvable — mise à jour depuis l'interface indisponible" >&2
 fi

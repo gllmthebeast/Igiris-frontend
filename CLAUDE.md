@@ -867,12 +867,11 @@ C'est tout. **Déterministe, rapide, hors ligne.**
 ## 11. Limites connues, à ne pas découvrir en route
 
 - **Les images sont des URL IGDB** (`cover_ref` pour la jaquette, `artwork_ref` pour le
-  bandeau), donc **le réseau est nécessaire pour les afficher**. C'est la seule entorse au
-  « hors ligne », et elle reste entière. Pour un vrai fonctionnement déconnecté il faudra un
-  **pack d'images** : demandé, chiffré (27 Mo en vignettes 90×120), et **en attente d'une
-  décision qui n'est pas technique** — redistribuer des jaquettes IGDB depuis notre propre
-  hébergement nous fait passer d'afficheur d'URL à distributeur. Tant que ce point n'est pas
-  tranché, la limite est assumée et documentée des deux côtés.
+  bandeau). Les **vignettes** se mettent désormais en cache localement (§14.2) : l'appareil
+  les cherche lui-même à la source, donc **rien n'est redistribué** et la question des
+  droits ne se pose plus. ~66 Mo, ~6 minutes, reprenable.
+  **Les fonds d'écran restent distants** : 2,5 Go pour le catalogue, hors de proportion. La
+  fiche s'affiche sans eux.
 - **Le synopsis est en anglais**, sur une interface française. IGDB n'en fournit pas de
   traduit ; le backend l'a vérifié plutôt que supposé. Mieux vaut le texte réel que rien,
   mais la fiche ne le présente pas comme localisé.
@@ -1040,6 +1039,43 @@ kilo-octets — et plus rien ensuite. Aucun téléchargement sans que l'utilisat
 **Hors ligne, l'interface le DIT** et ne tente rien : « hors ligne — le catalogue local
 reste utilisable ». C'est exact, et ce n'est pas une panne — l'export est entièrement local
 (§11).
+
+### 14.2 — Le cache local de vignettes
+
+La seule entorse au hors-ligne de tout le projet (§11), et elle se referme **sans que rien
+ne soit redistribué**.
+
+**Chaque appareil constitue le sien**, depuis IGDB — c'est-à-dire depuis la source que le
+frontend interroge déjà à chaque affichage. La seule différence est qu'il le fait UNE fois
+et garde le résultat. Héberger un pack nous-mêmes nous ferait passer d'afficheur d'URL à
+**distributeur** ; là, rien ne transite par nous, et la question des droits ne se pose pas.
+
+**Chiffres mesurés**, sur 120 vignettes tirées au hasard du catalogue réel :
+
+| | |
+|---|---|
+| Vignettes `t_cover_small` (90×120) | **3,9 Ko** en moyenne |
+| Pack complet, 17 353 jeux | **≈ 66 Mo** |
+| Durée, 4 tâches en parallèle | **≈ 6 minutes** (une heure en séquentiel) |
+
+> ⚠️ **Le chiffre de « 27 Mo » qui circulait était périmé** : il valait pour le catalogue à
+> 7 580 jeux. Il en fait 17 357 depuis le 1.7.0.
+
+**Les FONDS d'écran ne sont pas cachables** : 152 Ko en moyenne, soit **2,5 Go** pour le
+catalogue. Ils restent distants, et la fiche s'affiche sans eux.
+
+**Quatre tâches en parallèle, pas davantage.** Ces requêtes partent vers un service tiers
+que nous n'exploitons pas ; en ouvrir vingt par appareil serait discourtois et se ferait
+étrangler — c'est exactement ce qui est arrivé au backend avec GitHub, et qui a bloqué ses
+dats une journée entière.
+
+**Reprenable** : ce qui est déjà là n'est pas retéléchargé, et la progression se compte sur
+les fichiers présents. Une coupure au milieu de 17 000 fichiers ne fait pas tout
+recommencer, et un cache **incomplet reste utile** — chaque ligne retombe individuellement
+sur le réseau.
+
+Le nom du fichier **est** la clé du jeu (`igdb-1234.jpg`) : aucune règle de correspondance à
+appliquer sur l'appareil, c'est un lookup comme tout le reste (§0).
 
 > ⚠️ **`--limit-rate` ne s'applique pas à `file://`** — mesuré : 26 Mo en 14 ms. Un banc
 > d'essai qui sert l'export par `file://` ne peut donc pas exercer la progression, et

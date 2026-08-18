@@ -45,6 +45,49 @@ void UpdateService::setPaths(const QString &scriptPath, const QString &dataDir)
     emit stateChanged();
 }
 
+void UpdateService::setCoversScript(const QString &scriptPath)
+{
+    m_coversScript = scriptPath;
+    emit stateChanged();
+}
+
+void UpdateService::downloadCovers()
+{
+    if (busy() || m_coversScript.isEmpty() || !QFileInfo::exists(m_coversScript))
+        return;
+
+    m_coversJob = true;
+    m_progress  = -1;
+    m_total     = 0;
+    m_coversDir = QDir(m_dataDir).filePath(QStringLiteral("covers"));
+    m_status    = tr("téléchargement des vignettes…");
+
+    auto env = QProcessEnvironment::systemEnvironment();
+    env.insert(QStringLiteral("IGIRIS_MACHINE"), QStringLiteral("1"));
+    env.insert(QStringLiteral("IGIRIS_LIMIT_RATE"), QLatin1String(kRateLimit));
+    m_process.setProcessEnvironment(env);
+    m_process.setProgram(QStringLiteral("bash"));
+    m_process.setArguments({ m_coversScript, m_dataDir });
+    m_process.start();
+
+    m_poll.start();
+    emit stateChanged();
+    emit progressChanged();
+}
+
+void UpdateService::countCovers()
+{
+    // La progression se compte sur les FICHIERS PRÉSENTS et non sur un compteur de boucle :
+    // le script travaille à quatre tâches en parallèle, et cette mesure reste juste. Elle
+    // survit aussi à une interruption, puisqu'elle repart du disque.
+    if (m_coversDir.isEmpty() || m_total <= 0)
+        return;
+    const int got = QDir(m_coversDir).entryList({ QStringLiteral("*.jpg") }, QDir::Files).size();
+    m_progress     = qBound(0.0, static_cast<qreal>(got) / m_total, 1.0);
+    m_progressText = QStringLiteral("%1 / %2").arg(got).arg(m_total);
+    emit progressChanged();
+}
+
 void UpdateService::check()
 {
     run(false);
@@ -65,6 +108,7 @@ void UpdateService::run(bool downloadIfNeeded)
         return;
     }
 
+    m_coversJob    = false;
     m_wantDownload = downloadIfNeeded;
     m_progress     = -1;
     m_total        = 0;
@@ -103,6 +147,18 @@ void UpdateService::readOutput()
         const QString key   = payload.left(eq);
         const QString value = payload.mid(eq + 1);
 
+        // Les deux travaux partagent le même canal mais PAS la même logique : celle du
+        // catalogue interrompt le processus dès qu'elle sait qu'il y a du neuf, ce qui
+        // arrêterait net le téléchargement des vignettes. Elles sont donc séparées ici,
+        // avant toute interprétation.
+        if (m_coversJob) {
+            if (key == QLatin1String("total"))
+                m_total = value.toLongLong();
+            else if (key == QLatin1String("status") && value == QLatin1String("nodb"))
+                m_status = tr("catalogue absent : rien à illustrer");
+            continue;
+        }
+
         if (key == QLatin1String("version")) {
             m_remoteVersion = value;
         } else if (key == QLatin1String("total")) {
@@ -139,6 +195,10 @@ void UpdateService::readOutput()
 
 void UpdateService::pollProgress()
 {
+    if (m_coversJob) {
+        countCovers();
+        return;
+    }
     if (m_stageFile.isEmpty() || m_total <= 0)
         return;
 
@@ -165,8 +225,19 @@ void UpdateService::finished(int code, QProcess::ExitStatus status)
         m_status = tr("hors ligne — le catalogue local reste utilisable");
     }
 
-    if (code == 0 && m_wantDownload && !m_available)
+    if (m_coversJob) {
+        // Le décompte final vient du disque, pas du script : c'est la même mesure que
+        // pendant le travail, donc elle ne peut pas la contredire.
+        countCovers();
+        const int got = QDir(m_coversDir).entryList({ QStringLiteral("*.jpg") },
+                                                    QDir::Files).size();
+        m_status = code == 0 ? tr("%1 vignettes disponibles hors ligne").arg(got)
+                             : tr("vignettes : %1 récupérées, reprise possible").arg(got);
+        m_coversJob = false;
+        emit coversReady();
+    } else if (code == 0 && m_wantDownload && !m_available) {
         emit catalogueReplaced();
+    }
 
     m_progress = -1;
     m_progressText.clear();

@@ -9,6 +9,7 @@
 
 #include <QAbstractItemModelTester>
 #include <QSignalSpy>
+#include <QTemporaryDir>
 #include <QTest>
 
 using namespace igiris::ui;
@@ -148,6 +149,9 @@ private slots:
     void aliases_reportWhichOneMatched();
     void aliases_preferTheExactOneOverASubstring();
     void aliases_areAbsentFromAnOlderExportWithoutBreakingIt();
+
+    // --- cache local de vignettes ---
+    void covers_preferTheLocalFileOverTheRemoteUrl();
 };
 
 void TestGameListModel::languages_areUnavailableOnAnExportWithoutThem()
@@ -831,6 +835,46 @@ void TestGameListModel::aliases_areAbsentFromAnOlderExportWithoutBreakingIt()
     QVERIFY(model.data(model.index(0, 0), GameListModel::MatchedAliasRole)
                 .toString()
                 .isEmpty());
+}
+
+void TestGameListModel::covers_preferTheLocalFileOverTheRemoteUrl()
+{
+    QTemporaryDir dir;
+    auto          games = sampleGames();
+    games[1].coverRef   = QStringLiteral("https://images.igdb.com/abc.jpg");
+    games[2].coverRef   = QStringLiteral("https://images.igdb.com/def.jpg");
+
+    GameListModel model;
+    model.setCatalogue(games, {}, {});
+
+    // Une seule vignette en cache, sur igdb-2. Le nom du FICHIER est la clé du jeu : aucune
+    // règle de correspondance, c'est un lookup comme tout le reste (§0).
+    QFile file(dir.filePath(QStringLiteral("igdb-2.jpg")));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("jpeg");
+    file.close();
+
+    model.setCoversDirectory(dir.path());
+    QCOMPARE(model.localCoverCount(), 1);
+
+    QString localRow, remoteRow;
+    for (int row = 0; row < model.rowCount(); ++row) {
+        const auto key   = model.data(model.index(row, 0), GameListModel::GameKeyRole).toString();
+        const auto cover = model.data(model.index(row, 0), GameListModel::CoverRole).toString();
+        if (key == QStringLiteral("igdb-2"))
+            localRow = cover;
+        if (key == QStringLiteral("igdb-3"))
+            remoteRow = cover;
+    }
+
+    // Celle qui est en cache est servie DEPUIS LE DISQUE : c'est ce qui rend l'appareil
+    // utilisable sans réseau, la seule entorse au hors-ligne de tout le projet (§11).
+    QVERIFY(localRow.startsWith(QStringLiteral("file://")));
+    QVERIFY(localRow.endsWith(QStringLiteral("igdb-2.jpg")));
+
+    // Celle qui ne l'est pas retombe INDIVIDUELLEMENT sur le réseau : un cache incomplet
+    // reste utile, il n'est pas tout ou rien.
+    QCOMPARE(remoteRow, QStringLiteral("https://images.igdb.com/def.jpg"));
 }
 
 QTEST_MAIN(TestGameListModel)

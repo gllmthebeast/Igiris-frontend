@@ -51,6 +51,7 @@ public:
     // Où trouver le script et où déposer l'export. Les deux viennent du point d'entrée :
     // ce service ne devine aucun chemin, et surtout aucun chemin de distribution (§1).
     void setPaths(const QString &scriptPath, const QString &dataDir);
+    void setCoversScript(const QString &scriptPath);
 
     bool    updateAvailable() const { return m_available; }
     bool    busy() const { return m_process.state() != QProcess::NotRunning; }
@@ -65,15 +66,26 @@ public:
     // Télécharge et bascule. Rien n'est remplacé si l'empreinte ne concorde pas.
     Q_INVOKABLE void update();
 
+    // Constitue le cache LOCAL de vignettes, depuis IGDB, en arrière-plan.
+    //
+    // ⚠️ Rien n'est redistribué : l'appareil télécharge depuis la source que le frontend
+    // interroge déjà à chaque affichage. Il le fait une fois et garde le résultat, au lieu
+    // de refaire la requête à chaque défilement. C'est ce qui lève le point bloquant du
+    // §11 — héberger un pack nous-mêmes ferait de nous un distributeur.
+    Q_INVOKABLE void downloadCovers();
+
 signals:
     void stateChanged();
     void progressChanged();
     // Émis après une bascule réussie : le catalogue sur le disque a changé, tout ce qui en
     // dépend doit être rechargé.
     void catalogueReplaced();
+    // Le cache de vignettes a changé : la liste doit relire ce qui est disponible.
+    void coversReady();
 
 private:
     void run(bool downloadIfNeeded);
+    void countCovers();
     void readOutput();
     void pollProgress();
     void finished(int code, QProcess::ExitStatus status);
@@ -94,6 +106,9 @@ private:
     QString m_progressText;
     QString m_status;
     QString m_remoteVersion;
+    QString m_coversScript;
+    QString m_coversDir;
+    bool    m_coversJob = false;
 };
 
 } // namespace igiris::ui

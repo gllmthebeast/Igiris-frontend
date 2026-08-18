@@ -1,5 +1,7 @@
 #include "ui/GameListModel.h"
 
+#include <QDir>
+#include <QFileInfo>
 #include <QLocale>
 #include <QVariantMap>
 
@@ -115,6 +117,30 @@ void GameListModel::setOwnedLanguageMasks(QHash<QString, quint64> maskByGame)
         emit ownedLanguagesAvailableChanged();
     }
     rebuild();
+}
+
+void GameListModel::setCoversDirectory(const QString &directory)
+{
+    m_coversDir = directory;
+    m_localCovers.clear();
+
+    // Un seul parcours du répertoire, au démarrage. Le nom de fichier EST la clé du jeu :
+    // aucune règle de correspondance à appliquer, c'est un lookup comme tout le reste (§0).
+    QDir dir(directory);
+    const auto entries = dir.entryList({ QStringLiteral("*.jpg") }, QDir::Files);
+    for (const QString &entry : entries)
+        m_localCovers.insert(QFileInfo(entry).completeBaseName());
+
+    if (!m_games.isEmpty()) {
+        beginResetModel();
+        endResetModel();
+    }
+    emit coversChanged();
+}
+
+void GameListModel::refreshCovers()
+{
+    setCoversDirectory(m_coversDir);
 }
 
 void GameListModel::setAliases(QHash<QString, QList<catalog::GameAlias>> aliasesByGame)
@@ -470,6 +496,13 @@ QVariant GameListModel::data(const QModelIndex &index, int role) const
     case OwnedRole:
         return m_ownershipAvailable && m_owned.contains(entry.game.gameKey);
     case CoverRole:
+        // La vignette LOCALE d'abord, l'URL ensuite. C'est ce qui rend l'appareil autonome
+        // sans rien changer au reste : quand le cache est absent ou incomplet, chaque ligne
+        // retombe individuellement sur le réseau.
+        if (m_localCovers.contains(entry.game.gameKey)) {
+            return QStringLiteral("file://%1/%2.jpg")
+                .arg(m_coversDir, entry.game.gameKey);
+        }
         return entry.game.coverRef;
     case LanguagesRole: {
         // Construit à la demande, donc SEULEMENT pour les lignes visibles : le §8 met en

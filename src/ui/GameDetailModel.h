@@ -121,6 +121,10 @@ public:
     // Le référentiel de langues, pour l'ordre d'affichage et les libellés.
     void setLanguages(QList<catalog::Language> languages);
 
+    // Le cache local de vignettes. La fiche n'a qu'UN jeu à l'écran : un test d'existence
+    // à l'ouverture suffit, là où la liste doit relever tout le répertoire d'un coup.
+    void setCoversDirectory(const QString &directory);
+
     // Le référentiel de modes de jeu, pour les libellés. Injecté plutôt que requêté à
     // chaque ouverture de fiche, comme les langues : c'est une constante de l'export.
     void setGameModes(QList<catalog::GameMode> modes);
@@ -199,6 +203,7 @@ private:
     int        m_rating = 0;
     int        m_year   = 0;
     QString     m_coverRef;
+    QString     m_coversDir;
     QString     m_artworkRef;
     QString     m_summary;
     QStringList m_modeLabels;

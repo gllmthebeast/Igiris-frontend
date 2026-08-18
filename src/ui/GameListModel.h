@@ -104,6 +104,9 @@ class GameListModel : public QAbstractListModel
     // l'interrupteur, et non un simple échec silencieux.
     Q_PROPERTY(bool coversEnabled READ coversEnabled WRITE setCoversEnabled
                    NOTIFY coversEnabledChanged)
+    // Combien de vignettes sont DÉJÀ sur l'appareil. C'est ce qui permet à l'interface de
+    // proposer — ou non — de constituer le cache, et de dire où il en est.
+    Q_PROPERTY(int localCoverCount READ localCoverCount NOTIFY coversChanged)
 
     // --- filtre dynamique --------------------------------------------------------------
     Q_PROPERTY(int ownership READ ownership WRITE setOwnership NOTIFY ownershipChanged)
@@ -158,6 +161,20 @@ public:
     // Le masque DYNAMIQUE, issu du croisement export × ROMs possédées. Active « jouable ».
     void setOwnedLanguageMasks(QHash<QString, quint64> maskByGame);
 
+    // Le cache LOCAL de vignettes, constitué par l'appareil lui-même depuis IGDB.
+    //
+    // Rend la borne autonome : sans lui, la liste s'affiche sans une seule jaquette dès
+    // qu'il n'y a pas de réseau — la seule entorse au hors-ligne du §11.
+    //
+    // Les clés présentes sont relevées UNE fois, pas à chaque ligne affichée : 17 000
+    // appels à stat() pendant un défilement seraient exactement le genre de coût que le
+    // §8 interdit d'introduire sans le mesurer.
+    void setCoversDirectory(const QString &directory);
+
+    // Relit le répertoire. Appelé après que le cache a été complété, sans quoi la liste
+    // continuerait d'aller chercher sur le réseau des images désormais locales.
+    Q_INVOKABLE void refreshCovers();
+
     // Le référentiel de modes de jeu. Pas de masque à passer en second argument,
     // contrairement aux langues : il voyage déjà dans catalog::Game::modeMask.
     void setGameModes(QList<catalog::GameMode> modes);
@@ -201,6 +218,7 @@ public:
     bool        ownedLanguagesAvailable() const { return m_ownedLanguagesAvailable; }
     int         maxBadges() const { return kMaxBadges; }
     bool        coversEnabled() const { return m_coversEnabled; }
+    int         localCoverCount() const { return static_cast<int>(m_localCovers.size()); }
     void        setCoversEnabled(bool enabled);
 
     QStringList modeFilter() const { return m_modeFilter; }
@@ -231,6 +249,7 @@ signals:
     void languagesChanged();
     void ownedLanguagesAvailableChanged();
     void coversEnabledChanged();
+    void coversChanged();
     void modeFilterChanged();
     void modesChanged();
 
@@ -292,6 +311,8 @@ private:
     QHash<QString, quint64>  m_langMaskByGame;
     QHash<QString, quint64>  m_ownedLangMaskByGame;
     QHash<QString, QList<catalog::GameAlias>> m_aliasesByGame;
+    QString                                   m_coversDir;
+    QSet<QString>                             m_localCovers;
     QStringList              m_languageFilter;
     QStringList              m_unfilterableLanguages;
     quint64                  m_requiredLangMask = 0;

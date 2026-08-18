@@ -1,5 +1,6 @@
 #include "ui/GameDetailModel.h"
 
+#include <QFileInfo>
 #include <QSet>
 #include <QVariantMap>
 
@@ -56,6 +57,13 @@ void GameDetailModel::setLanguages(QList<catalog::Language> languages)
         setGame(m_gameKey);
 }
 
+void GameDetailModel::setCoversDirectory(const QString &directory)
+{
+    m_coversDir = directory;
+    if (!m_gameKey.isEmpty())
+        setGame(m_gameKey);
+}
+
 void GameDetailModel::setGameModes(QList<catalog::GameMode> modes)
 {
     m_modes = std::move(modes);
@@ -106,6 +114,16 @@ void GameDetailModel::setGame(const QString &gameKey)
             m_rating     = game->rating;
             m_year       = game->year;
             m_coverRef   = game->coverRef;
+
+            // La vignette LOCALE d'abord : c'est ce qui rend la fiche lisible sans réseau.
+            // Le bandeau, lui, reste distant — une illustration pèse 152 Ko en moyenne, un
+            // cache complet ferait 2,5 Go, sans commune mesure avec les 66 Mo des vignettes.
+            if (!m_coversDir.isEmpty()) {
+                const QString local =
+                    QStringLiteral("%1/%2.jpg").arg(m_coversDir, gameKey);
+                if (QFileInfo::exists(local))
+                    m_coverRef = QStringLiteral("file://") + local;
+            }
             m_artworkRef = game->artworkRef;
             m_summary    = game->summary;
 

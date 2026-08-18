@@ -173,6 +173,59 @@ Window {
                 Keys.onEnterPressed: launch()
             }
 
+            // ------------------------------------------- vignettes hors ligne
+            //
+            // Proposé UNIQUEMENT tant que le cache est incomplet, et jamais imposé : c'est
+            // une soixantaine de mégaoctets et quelques minutes, l'utilisateur doit le
+            // décider.
+            //
+            // Les vignettes sont la SEULE entorse au hors-ligne de tout le projet (§11).
+            // Ce bouton la referme, sans que rien ne soit redistribué : l'appareil va les
+            // chercher à la source que le frontend interroge déjà.
+            Item {
+                id: coversCell
+
+                anchors.verticalCenter: parent.verticalCenter
+                visible: games.localCoverCount < games.totalCount && !updates.busy
+                width: coversRow.implicitWidth + 26
+                height: 42
+                activeFocusOnTab: true
+
+                Rectangle {
+                    anchors.fill: parent
+                    radius: 6
+                    color: coversCell.activeFocus ? theme.selection : "#242430"
+                    border.width: 1
+                    border.color: coversCell.activeFocus ? theme.selection : "#3a3a4a"
+                }
+
+                Row {
+                    id: coversRow
+                    anchors.centerIn: parent
+                    spacing: 8
+
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "⤓"
+                        color: theme.dim
+                        font.pixelSize: 16
+                    }
+
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        // Le compte est DIT : « vignettes » seul ne laisse pas deviner s'il
+                        // en manque dix ou dix-sept mille.
+                        text: qsTr("Vignettes  %1 / %2").arg(games.localCoverCount)
+                                                        .arg(games.totalCount)
+                        color: theme.dim
+                        font.pixelSize: 15
+                    }
+                }
+
+                Keys.onReturnPressed: updates.downloadCovers()
+                Keys.onEnterPressed: updates.downloadCovers()
+            }
+
             // ------------------------------------------------- réglages de l'hôte
             //
             // EN HAUT À DROITE, et non parmi les filtres où il était en 1.9.0 : là-bas il
@@ -459,6 +512,11 @@ Window {
         target: updates
         function onCatalogueReplaced() {
             hostMessage.text = qsTr("Catalogue mis à jour — redémarrez igiris pour le charger.")
+        }
+        // Le cache a changé : la liste doit relire ce qui est disponible, sinon elle
+        // continuerait d'aller chercher sur le réseau des images désormais locales.
+        function onCoversReady() {
+            games.refreshCovers()
         }
     }
 

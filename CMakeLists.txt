@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 
 # SemVer strict (CLAUDE.md §15) : cette version est la seule source de vérité.
 # Elle alimente version.h, et c'est elle qu'affiche `igiris-frontend --version`.
-project(igiris-frontend VERSION 1.12.0 LANGUAGES CXX)
+project(igiris-frontend VERSION 1.13.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -91,7 +91,7 @@ target_link_libraries(igiris-frontend PRIVATE Qt6::Quick SQLite::SQLite3 igiris-
 include(GNUInstallDirs)
 
 install(TARGETS igiris-frontend RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-install(FILES tools/fetch-export.sh tools/probe.py
+install(FILES tools/fetch-export.sh tools/fetch-covers.sh tools/probe.py
         DESTINATION ${CMAKE_INSTALL_DATADIR}/igiris-frontend/tools
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
                     WORLD_READ WORLD_EXECUTE)
