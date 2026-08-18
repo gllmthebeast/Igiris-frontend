@@ -887,9 +887,9 @@ C'est tout. **Déterministe, rapide, hors ligne.**
 - **Les images sont des URL IGDB** (`cover_ref` pour la jaquette, `artwork_ref` pour le
   bandeau). Les **vignettes** se mettent désormais en cache localement (§14.2) : l'appareil
   les cherche lui-même à la source, donc **rien n'est redistribué** et la question des
-  droits ne se pose plus. ~66 Mo, ~6 minutes, reprenable.
-  **Les fonds d'écran sont optionnels** : 500 Mo au minimum, contre 66 pour les vignettes.
-  Non installés par défaut ; la fiche s'affiche très bien sans eux.
+  droits ne se pose plus. Les **fonds d'écran** suivent depuis la 1.15.0, dans la même
+  opération : ≈ **570 Mo** au total, ≈ 20 minutes, reprenable. `IGIRIS_WITH_ARTWORK=0`
+  pour s'en passer sur une carte SD à l'étroit — la fiche s'affiche quand même.
 - **Le synopsis est en anglais**, sur une interface française. IGDB n'en fournit pas de
   traduit ; le backend l'a vérifié plutôt que supposé. Mieux vaut le texte réel que rien,
   mais la fiche ne le présente pas comme localisé.
@@ -1079,20 +1079,32 @@ et garde le résultat. Héberger un pack nous-mêmes nous ferait passer d'affich
 > ⚠️ **Le chiffre de « 27 Mo » qui circulait était périmé** : il valait pour le catalogue à
 > 7 580 jeux. Il en fait 17 357 depuis le 1.7.0.
 
-**Les FONDS d'écran sont OPTIONNELS** (`IGIRIS_WITH_ARTWORK=1`), et pas du même ordre —
-mesuré sur 40 fonds tirés au hasard :
+**Les FONDS d'écran sont PRIS PAR DÉFAUT depuis la 1.15.0**, et se retirent avec
+`IGIRIS_WITH_ARTWORK=0`. Mesuré sur 40 fonds tirés au hasard :
 
 | Variante IGDB | Poids unitaire | Pack de 16 904 |
 |---|---|---|
-| `t_screenshot_med` (569×320) — **défaut si activé** | 30 Ko | **≈ 500 Mo** |
+| `t_screenshot_med` (569×320) — **le défaut** | 30 Ko | **≈ 500 Mo** |
 | `t_720p` (1280×720) | 88 Ko | ≈ 1,5 Go |
 | `t_1080p` (l'original de l'export) | 152 Ko | ≈ 2,5 Go |
 
-Les vignettes rendent la liste **utilisable** ; les fonds sont un **confort**. Les mettre
-sur le même plan aurait été malhonnête, d'où le défaut : vignettes seules.
+Ils l'étaient en option en 1.14.0, et ce n'était pas le bon arbitrage : **une seule chose
+qui manque suffit à faire mentir « hors ligne »**. Une fiche dont le décor part chercher le
+réseau n'est pas une fiche locale, et l'utilisateur qui coupe le wifi ne s'attend pas à ce
+qu'une moitié de son écran disparaisse. La variante par défaut n'est donc pas la plus
+belle — c'est celle qui tient sur une carte SD.
 
 Ils sont rangés sous `<clé>-fond.jpg`, dans le même répertoire — le nom du fichier reste la
 clé du jeu, et il n'y a toujours qu'un lookup à faire.
+
+> ⚠️ **Ce qui partage un répertoire finit par se faire compter ensemble.** Deux compteurs
+> énuméraient `*.jpg` : celui du bouton (« Vignettes 1 234 / 17 357 ») et celui du bilan de
+> fin. Avec les fonds activés, ils comptaient **le double**, et le bouton — qui s'efface
+> quand le compte atteint le total — **disparaissait à mi-chemin**, sur une liste encore à
+> moitié illustrée et sans plus rien à cliquer.
+>
+> Les deux excluent désormais le suffixe `-fond`, et un test le vérifie : il échoue sur le
+> code d'avant, ce qui a été constaté et non supposé.
 
 **Quatre tâches en parallèle, pas davantage.** Ces requêtes partent vers un service tiers
 que nous n'exploitons pas ; en ouvrir vingt par appareil serait discourtois et se ferait

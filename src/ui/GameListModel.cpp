@@ -128,8 +128,21 @@ void GameListModel::setCoversDirectory(const QString &directory)
     // aucune règle de correspondance à appliquer, c'est un lookup comme tout le reste (§0).
     QDir dir(directory);
     const auto entries = dir.entryList({ QStringLiteral("*.jpg") }, QDir::Files);
-    for (const QString &entry : entries)
-        m_localCovers.insert(QFileInfo(entry).completeBaseName());
+    for (const QString &entry : entries) {
+        const QString base = QFileInfo(entry).completeBaseName();
+
+        // Les FONDS partagent ce répertoire, sous « <clé>-fond.jpg ». Ils n'ont rien à
+        // faire ici : ce jeu d'entrées répond à « ce jeu a-t-il sa vignette ? », et il
+        // alimente le compteur affiché en haut de l'écran.
+        //
+        // Depuis que les fonds sont pris par défaut, les compter reviendrait à annoncer
+        // deux fois plus de vignettes qu'il n'en existe — et à faire disparaître le bouton
+        // de téléchargement dès la moitié du travail, puisqu'il s'efface quand le compte
+        // atteint le total. La liste resterait à moitié illustrée sans plus rien proposer.
+        if (base.endsWith(QLatin1String("-fond")))
+            continue;
+        m_localCovers.insert(base);
+    }
 
     if (!m_games.isEmpty()) {
         beginResetModel();

@@ -14,22 +14,34 @@
 #   IGIRIS_MACHINE=1        lignes « igiris:clé=valeur » analysables par l'application
 #   IGIRIS_LIMIT_RATE=1M    plafond de débit passé à curl
 #   IGIRIS_COVER_VARIANT    variante IGDB (défaut t_cover_small, 90×120, ~3,9 Ko)
-#   IGIRIS_WITH_ARTWORK=1   ajoute les FONDS D'ÉCRAN des fiches. Mesuré, et à décider en
-#                           connaissance de cause — ce n'est pas du même ordre :
+#   IGIRIS_WITH_ARTWORK=0   retire les FONDS D'ÉCRAN des fiches. Ils sont pris PAR DÉFAUT
+#                           depuis la 1.15.0 : la fiche est alors entièrement hors ligne,
+#                           décor compris, et plus rien ne dépend du réseau une fois le
+#                           cache constitué.
+#
+#                           Ce que ça coûte, mesuré et non estimé :
 #
 #                             vignettes  t_cover_small      3,9 Ko →   66 Mo
-#                             fonds      t_screenshot_med    30 Ko →  500 Mo
+#                             fonds      t_screenshot_med    30 Ko →  500 Mo   ← défaut
 #                             fonds      t_720p              88 Ko → 1458 Mo
 #
-#                           D'où le défaut : vignettes SEULES. Les fonds sont un confort,
-#                           les vignettes rendent la liste utilisable.
+#                           Soit ≈ 570 Mo au total. La variante par défaut n'est pas la
+#                           plus belle : c'est celle qui reste raisonnable sur une carte SD.
+#                           IGIRIS_ARTWORK_VARIANT=t_720p pour le confort, si la place est là.
 set -euo pipefail
 
 DATA="${1:-$(cd "$(dirname "$0")/.." && pwd)/data}"
 DB="$DATA/games.db"
 DEST="$DATA/covers"
 VARIANT="${IGIRIS_COVER_VARIANT:-t_cover_small}"
-ARTWORK="${IGIRIS_WITH_ARTWORK:-}"
+# Les fonds sont pris PAR DÉFAUT, et se retirent explicitement. L'inverse — les proposer
+# en option — laissait la fiche dépendre du réseau pour son décor alors que tout le reste
+# était local : une seule chose manquante suffit à faire mentir « hors ligne ».
+#
+# La valeur est comparée à 0 et non testée « non vide » : IGIRIS_WITH_ARTWORK=0 doit
+# désactiver, pas activer parce que la chaîne « 0 » n'est pas vide.
+ARTWORK="${IGIRIS_WITH_ARTWORK:-1}"
+[ "$ARTWORK" = "0" ] && ARTWORK=""
 ARTWORK_VARIANT="${IGIRIS_ARTWORK_VARIANT:-t_screenshot_med}"
 
 MACHINE="${IGIRIS_MACHINE:-}"
@@ -56,13 +68,15 @@ if [ -n "$ARTWORK" ]; then
     sqlite3 "$DB" \
       "SELECT game_key || '-fond ' || replace(artwork_ref, 't_1080p', '$ARTWORK_VARIANT')
          FROM exp_game WHERE artwork_ref IS NOT NULL AND artwork_ref != '';" >> "$LISTE"
-    echo "▶ fonds d'écran INCLUS ($ARTWORK_VARIANT) — comptez plusieurs centaines de Mo"
+    echo "▶ fonds d'écran inclus ($ARTWORK_VARIANT) — IGIRIS_WITH_ARTWORK=0 pour s'en passer"
+else
+    echo "▶ fonds d'écran exclus — les fiches iront les chercher en ligne"
 fi
 
 total="$(wc -l < "$LISTE")"
 say "total=$total"
 say "status=downloading"
-echo "▶ $total vignettes · variante $VARIANT · destination $DEST"
+echo "▶ $total images · variante $VARIANT · destination $DEST"
 
 # QUATRE en parallèle, et pas davantage.
 #
@@ -104,4 +118,4 @@ xargs -d '\n' -P "$PARALLELE" -I{} bash -c 'recupere "{}"' < "$LISTE"
 pris="$(find "$DEST" -maxdepth 1 -name '*.jpg' -type f | wc -l)"
 say "done=$pris"
 say "status=ok"
-echo "✓ $pris / $total vignettes · $(du -sh "$DEST" | cut -f1) dans $DEST"
+echo "✓ $pris / $total images · $(du -sh "$DEST" | cut -f1) dans $DEST"

@@ -229,10 +229,19 @@ void UpdateService::finished(int code, QProcess::ExitStatus status)
         // Le décompte final vient du disque, pas du script : c'est la même mesure que
         // pendant le travail, donc elle ne peut pas la contredire.
         countCovers();
-        const int got = QDir(m_coversDir).entryList({ QStringLiteral("*.jpg") },
-                                                    QDir::Files).size();
-        m_status = code == 0 ? tr("%1 vignettes disponibles hors ligne").arg(got)
-                             : tr("vignettes : %1 récupérées, reprise possible").arg(got);
+        // Vignettes et fonds sont comptés SÉPARÉMENT, parce qu'ils ne servent pas à la
+        // même chose : les premières rendent la liste lisible, les seconds décorent la
+        // fiche. Un total unique laisserait croire à deux fois plus de jeux illustrés.
+        const auto fichiers = QDir(m_coversDir).entryList({ QStringLiteral("*.jpg") },
+                                                          QDir::Files);
+        int fonds = 0;
+        for (const QString &f : fichiers) {
+            if (f.endsWith(QLatin1String("-fond.jpg")))
+                ++fonds;
+        }
+        const int got = fichiers.size() - fonds;
+        m_status = code == 0 ? tr("%1 vignettes et %2 fonds hors ligne").arg(got).arg(fonds)
+                             : tr("%1 vignettes, %2 fonds — reprise possible").arg(got).arg(fonds);
         m_coversJob = false;
         emit coversReady();
     } else if (code == 0 && m_wantDownload && !m_available) {

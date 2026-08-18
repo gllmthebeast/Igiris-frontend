@@ -176,12 +176,13 @@ Window {
             // ------------------------------------------- vignettes hors ligne
             //
             // Proposé UNIQUEMENT tant que le cache est incomplet, et jamais imposé : c'est
-            // une soixantaine de mégaoctets et quelques minutes, l'utilisateur doit le
-            // décider.
+            // environ 570 Mo — 66 de vignettes, 500 de fonds — et un bon moment, donc
+            // l'utilisateur doit le décider.
             //
-            // Les vignettes sont la SEULE entorse au hors-ligne de tout le projet (§11).
-            // Ce bouton la referme, sans que rien ne soit redistribué : l'appareil va les
-            // chercher à la source que le frontend interroge déjà.
+            // Les images sont la SEULE entorse au hors-ligne de tout le projet (§11). Ce
+            // bouton la referme ENTIÈREMENT depuis la 1.15.0, fonds d'écran compris, sans
+            // que rien ne soit redistribué : l'appareil va les chercher à la source que le
+            // frontend interroge déjà.
             Item {
                 id: coversCell
 
@@ -214,7 +215,10 @@ Window {
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
                         // Le compte est DIT : « vignettes » seul ne laisse pas deviner s'il
-                        // en manque dix ou dix-sept mille.
+                        // en manque dix ou dix-sept mille. Il ne compte QUE les vignettes,
+                        // jamais les fonds qui partagent leur répertoire — sinon il
+                        // atteindrait le total à mi-chemin et le bouton s'effacerait sur
+                        // une liste encore à moitié illustrée.
                         text: qsTr("Vignettes  %1 / %2").arg(games.localCoverCount)
                                                         .arg(games.totalCount)
                         color: theme.dim

@@ -152,6 +152,7 @@ private slots:
 
     // --- cache local de vignettes ---
     void covers_preferTheLocalFileOverTheRemoteUrl();
+    void covers_ignoreLesFondsQuiPartagentLeRepertoire();
 };
 
 void TestGameListModel::languages_areUnavailableOnAnExportWithoutThem()
@@ -875,6 +876,48 @@ void TestGameListModel::covers_preferTheLocalFileOverTheRemoteUrl()
     // Celle qui ne l'est pas retombe INDIVIDUELLEMENT sur le réseau : un cache incomplet
     // reste utile, il n'est pas tout ou rien.
     QCOMPARE(remoteRow, QStringLiteral("https://images.igdb.com/def.jpg"));
+}
+
+void TestGameListModel::covers_ignoreLesFondsQuiPartagentLeRepertoire()
+{
+    QTemporaryDir dir;
+    auto          games = sampleGames();
+
+    GameListModel model;
+    model.setCatalogue(games, {}, {});
+
+    // Le répertoire contient les DEUX sortes d'images, parce que c'est ce que produit
+    // fetch-covers.sh depuis que les fonds sont pris par défaut : une vignette « <clé>.jpg »
+    // et un fond « <clé>-fond.jpg », côte à côte.
+    for (const QString &nom : { QStringLiteral("igdb-2.jpg"),
+                                QStringLiteral("igdb-2-fond.jpg"),
+                                QStringLiteral("igdb-3-fond.jpg") }) {
+        QFile file(dir.filePath(nom));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("jpeg");
+        file.close();
+    }
+
+    model.setCoversDirectory(dir.path());
+
+    // UNE seule vignette, et non trois fichiers. Le compteur répond à « combien de jeux
+    // sont illustrés dans la liste », pas à « combien de fichiers traînent sur le disque ».
+    //
+    // Ce que ça évite concrètement : le bouton de téléchargement s'efface quand le compte
+    // atteint le total des jeux. Compter les fonds le ferait disparaître à mi-chemin, en
+    // laissant la liste à moitié illustrée et l'utilisateur sans rien à cliquer.
+    QCOMPARE(model.localCoverCount(), 1);
+
+    // Et un jeu qui n'a QUE son fond n'est pas considéré comme illustré : sa vignette vient
+    // toujours du réseau.
+    for (int row = 0; row < model.rowCount(); ++row) {
+        const auto key = model.data(model.index(row, 0), GameListModel::GameKeyRole).toString();
+        if (key != QStringLiteral("igdb-3"))
+            continue;
+        const auto cover = model.data(model.index(row, 0), GameListModel::CoverRole).toString();
+        QVERIFY2(!cover.startsWith(QStringLiteral("file://")),
+                 "un fond ne tient pas lieu de vignette");
+    }
 }
 
 QTEST_MAIN(TestGameListModel)

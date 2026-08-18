@@ -116,8 +116,6 @@ void GameDetailModel::setGame(const QString &gameKey)
             m_coverRef   = game->coverRef;
 
             // La vignette LOCALE d'abord : c'est ce qui rend la fiche lisible sans réseau.
-            // Le bandeau, lui, reste distant — une illustration pèse 152 Ko en moyenne, un
-            // cache complet ferait 2,5 Go, sans commune mesure avec les 66 Mo des vignettes.
             if (!m_coversDir.isEmpty()) {
                 const QString local =
                     QStringLiteral("%1/%2.jpg").arg(m_coversDir, gameKey);
@@ -130,9 +128,10 @@ void GameDetailModel::setGame(const QString &gameKey)
             // dans un second répertoire : le nom du fichier reste la clé du jeu, et il n'y
             // a toujours qu'un lookup à faire (§0).
             //
-            // Optionnel et non installé par défaut : 500 Mo au minimum, contre 66 pour les
-            // vignettes. Les vignettes rendent la liste utilisable, les fonds sont un
-            // confort — les mettre sur le même plan aurait été malhonnête.
+            // Pris PAR DÉFAUT depuis la 1.15.0, en t_screenshot_med : 500 Mo, contre 66
+            // pour les vignettes. C'est ce qui achève le hors-ligne de la fiche — une
+            // seule chose manquante suffisait à le faire mentir. Qui n'a pas la place
+            // installe avec IGIRIS_WITH_ARTWORK=0, et la fiche s'affiche quand même.
             if (!m_coversDir.isEmpty() && !m_artworkRef.isEmpty()) {
                 const QString local =
                     QStringLiteral("%1/%2-fond.jpg").arg(m_coversDir, gameKey);
