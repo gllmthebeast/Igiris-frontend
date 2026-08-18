@@ -103,6 +103,76 @@ Window {
                 text: "v" + appVersion
             }
 
+            // ------------------------------------------------------ mise à jour
+            //
+            // UNE pastille, globale, et rien d'autre — le §0 veut une interface minimale,
+            // pas un centre de notifications. Elle n'apparaît que s'il y a réellement
+            // quelque chose à prendre.
+            //
+            // Le téléchargement est en ARRIÈRE-PLAN : la liste reste utilisable pendant ce
+            // temps, et le débit est plafonné pour ne pas manger la connexion.
+            Item {
+                id: updateCell
+
+                anchors.verticalCenter: parent.verticalCenter
+                visible: updates.updateAvailable || updates.busy
+                width: updateRow.implicitWidth + 28
+                height: 42
+                activeFocusOnTab: true
+
+                Rectangle {
+                    anchors.fill: parent
+                    radius: 6
+                    color: updateCell.activeFocus ? theme.selection : "#243024"
+                    border.width: 1
+                    border.color: updateCell.activeFocus ? theme.selection : "#3f6b3f"
+
+                    // La progression EST le fond du bouton : pas de barre séparée à caser
+                    // dans une barre déjà chargée, et l'avancement se lit à trois mètres.
+                    Rectangle {
+                        visible: updates.busy && updates.progress >= 0
+                        anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+                        width: parent.width * Math.max(0, updates.progress)
+                        radius: 6
+                        color: "#3f6b3f"
+                        opacity: 0.55
+                    }
+                }
+
+                Row {
+                    id: updateRow
+                    anchors.centerIn: parent
+                    spacing: 8
+
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: updates.busy ? "↓" : "●"
+                        color: theme.text
+                        font.pixelSize: 15
+                    }
+
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        // Le compteur remplace le libellé pendant le travail : c'est la
+                        // seule information utile à ce moment-là.
+                        text: updates.busy
+                              ? (updates.progressText.length > 0
+                                 ? updates.progressText : qsTr("mise à jour…"))
+                              : qsTr("Mettre à jour")
+                        color: theme.text
+                        font.pixelSize: 17
+                    }
+                }
+
+                function launch() {
+                    if (!updates.busy)
+                        updates.update()
+                }
+
+                Keys.onReturnPressed: launch()
+                Keys.onEnterPressed: launch()
+            }
+
             // ------------------------------------------------- réglages de l'hôte
             //
             // EN HAUT À DROITE, et non parmi les filtres où il était en 1.9.0 : là-bas il
@@ -372,10 +442,24 @@ Window {
 
         anchors { top: filterBar.bottom; left: parent.left; leftMargin: 24
                   right: parent.right; rightMargin: 24 }
+        // Une SEULE ligne d'état pour tout ce qui n'est pas la liste : réglages de l'hôte
+        // et mises à jour. Deux zones de message dans une interface aussi dépouillée se
+        // seraient concurrencées.
         visible: text.length > 0
+        text: updates.status.length > 0 ? updates.status : ""
         color: "#d8a657"
         font.pixelSize: 16
         wrapMode: Text.WordWrap
+    }
+
+    // Le catalogue a été remplacé sur le disque : tout ce qui en dépend doit être relu.
+    // Sans ça, l'application continuerait d'afficher l'ancien jusqu'au prochain démarrage,
+    // en annonçant qu'elle est à jour.
+    Connections {
+        target: updates
+        function onCatalogueReplaced() {
+            hostMessage.text = qsTr("Catalogue mis à jour — redémarrez igiris pour le charger.")
+        }
     }
 
     // ------------------------------------------------------------------- liste
@@ -533,6 +617,10 @@ Window {
             detailSheet.visible = true
             detailSheet.forceActiveFocus()
         }
+        // Vérifié UNE fois au démarrage, et jamais ensuite : le manifeste seul, quelques
+        // kilo-octets. Rien n'est téléchargé sans que l'utilisateur le demande, et rien ne
+        // se déclenche pendant qu'il joue.
+        updates.check()
     }
 
     // ------------------------------------------------------------------- fiche

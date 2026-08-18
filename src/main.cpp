@@ -33,6 +33,7 @@
 #include "ui/GameDetailModel.h"
 #include "ui/GameListModel.h"
 #include "ui/HostActions.h"
+#include "ui/UpdateService.h"
 #include "version.h"
 
 namespace {
@@ -903,6 +904,9 @@ int main(int argc, char *argv[])
     // Les actions qui s'adressent à l'HÔTE et non au catalogue : aujourd'hui, rendre
     // l'écran à son interface de réglages (§1, responsabilité 6).
     igiris::ui::HostActions         host;
+    // La mise à jour du catalogue, depuis l'interface : sur une borne sans clavier, un
+    // script de terminal n'est pas un moyen de livraison (§14).
+    igiris::ui::UpdateService       updates;
     QString                         catalogueError;
 
     // L'adaptateur : détecté sur la machine, ou forcé sur une racine factice (image
@@ -963,6 +967,34 @@ int main(int argc, char *argv[])
         // est reconnue — plutôt qu'un chemin de développement : c'est là que l'utilisateur
         // doit déposer le fichier, et le message doit le lui dire.
         exportPath = candidates.first();
+    }
+
+    // Le service de mise à jour dépose l'export LÀ OÙ il est déjà lu, et cherche le script
+    // à côté du binaire. Aucun chemin n'est deviné ici, et surtout aucun chemin de
+    // distribution : celui de l'export vient de l'adaptateur (§1).
+    {
+        const QString dataDir = QFileInfo(exportPath).absolutePath();
+        // Installé à côté du binaire sur l'appareil, ou dans tools/ dans un dépôt : les
+        // deux emplacements sont testés, plutôt que d'en supposer un.
+        const QString binDir = QCoreApplication::applicationDirPath();
+        QStringList   scripts{
+            QDir(binDir).filePath(QStringLiteral("fetch-export.sh")),
+            QDir(binDir).filePath(QStringLiteral("../share/igiris-frontend/tools/fetch-export.sh")),
+            QDir(binDir).filePath(QStringLiteral("../tools/fetch-export.sh")),
+        };
+        QString script;
+        for (const QString &candidate : scripts) {
+            if (QFileInfo::exists(candidate)) {
+                script = QFileInfo(candidate).absoluteFilePath();
+                break;
+            }
+        }
+        updates.setPaths(script, dataDir);
+        if (script.isEmpty())
+            std::fprintf(stderr, "⚠ fetch-export.sh introuvable : mise à jour du catalogue "
+                                 "indisponible depuis l'interface\n");
+        else
+            std::printf("mise à jour : %s → %s\n", qPrintable(script), qPrintable(dataDir));
     }
 
     if (catalogue.open(exportPath, &catalogueError)) {
@@ -1234,6 +1266,7 @@ int main(int argc, char *argv[])
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("games"), &games);
     engine.rootContext()->setContextProperty(QStringLiteral("host"), &host);
+    engine.rootContext()->setContextProperty(QStringLiteral("updates"), &updates);
     engine.rootContext()->setContextProperty(QStringLiteral("detail"), &detail);
     // La version, exposée à l'interface. Sur un appareil mis à jour par scp, savoir CE QUI
     // tourne sans passer par un terminal est la première question qu'on se pose.

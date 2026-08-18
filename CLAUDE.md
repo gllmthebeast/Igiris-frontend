@@ -1002,9 +1002,48 @@ en production depuis cette même base.
   ne remplace l'ancien qu'en cas de succès (téléchargement à côté, bascule par un seul
   `mv`). Ne fait rien si le fichier local est déjà le bon. Base surchargeable par
   `IGIRIS_EXPORT_BASE`.
+  **Il est aussi PILOTÉ par l'application** depuis la 1.12.0 (`UpdateService`), via trois
+  variables d'environnement : `IGIRIS_MACHINE=1` pour des lignes analysables,
+  `IGIRIS_LIMIT_RATE` pour plafonner le débit, `IGIRIS_STAGE_DIR` pour rendre la
+  progression observable.
+
+  ⚠️ **L'application ne réimplémente pas le téléchargement.** Ce script porte la seule
+  chose qui compte — vérifier l'empreinte AVANT de remplacer, basculer d'un seul `mv` — et
+  le dupliquer en C++ aurait créé deux vérités dont une non éprouvée. Ça évite au passage
+  d'ajouter `Qt6Network`, que le §12 demande de peser puisqu'il doit être cross-compilé
+  dans les images Buildroot. `curl` et `python3` sont déjà sur les distributions cibles.
+
 - `tools/probe.py` — preuve de bout en bout : ouvre l'export en immuable, contrôle la
   version de schéma contre `SUPPORTED_MAJOR`, et exécute les quatre requêtes types (§3).
   **À lancer en premier**, et après chaque mise à jour de l'export.
+
+### 14.1 — Mettre à jour depuis l'interface
+
+**Un script de terminal n'est pas un moyen de livraison.** Sur une borne branchée à une
+télévision, sans clavier, `fetch-export.sh` n'existe pas : sans bouton, personne ne met
+jamais rien à jour, et la cadence de versions est du théâtre.
+
+Le minimum, et il tient en peu :
+
+- **une pastille**, globale, qui n'apparaît que s'il y a réellement quelque chose à prendre.
+  Le §0 veut une interface minimale, pas un centre de notifications ;
+- **un téléchargement en arrière-plan** — la liste reste utilisable pendant ce temps ;
+- **un débit plafonné** (2 Mo/s). Une borne qui prend toute la connexion pendant qu'on joue
+  est une mauvaise surprise ;
+- **un compteur indicatif** — « 12,4 / 26,1 Mo », lisible à trois mètres, ce qu'un
+  pourcentage seul n'est pas. Il se lit sur la taille du fichier en cours d'écriture, faute
+  de quoi il faudrait analyser la sortie de `curl`, plus fragile.
+
+**Rien d'automatique.** Une vérification au démarrage — le manifeste seul, quelques
+kilo-octets — et plus rien ensuite. Aucun téléchargement sans que l'utilisateur le demande.
+
+**Hors ligne, l'interface le DIT** et ne tente rien : « hors ligne — le catalogue local
+reste utilisable ». C'est exact, et ce n'est pas une panne — l'export est entièrement local
+(§11).
+
+> ⚠️ **`--limit-rate` ne s'applique pas à `file://`** — mesuré : 26 Mo en 14 ms. Un banc
+> d'essai qui sert l'export par `file://` ne peut donc pas exercer la progression, et
+> conclurait à tort qu'elle ne marche pas. Il faut un vrai serveur HTTP.
 
 ---
 

@@ -113,6 +113,21 @@ LANCEUR
 chmod +x "$START_DST"
 echo "✓ lanceur installé : $START_DST (repli sur $ES_CMD)"
 
+# ------------------------------------------------- outil de mise à jour
+#
+# Déposé À CÔTÉ du binaire, c'est là qu'il le cherche en premier. Sans lui, le bouton de
+# mise à jour de l'interface reste inerte : sur une borne sans clavier, c'est le SEUL moyen
+# de récupérer un nouveau catalogue.
+FETCH_SRC="$(dirname "$0")/../../tools/fetch-export.sh"
+[ -f "$FETCH_SRC" ] || FETCH_SRC="$(dirname "$0")/fetch-export.sh"
+if [ -f "$FETCH_SRC" ]; then
+    cp -f "$FETCH_SRC" /userdata/system/igiris/fetch-export.sh
+    chmod +x /userdata/system/igiris/fetch-export.sh
+    echo "✓ outil de mise à jour installé : /userdata/system/igiris/fetch-export.sh"
+else
+    echo "⚠ fetch-export.sh introuvable — mise à jour depuis l'interface indisponible" >&2
+fi
+
 # ------------------------------------------------------- entrée « port »
 #
 # Déposée en plus, et sans condition : elle ne coûte rien et couvre le cas où l'utilisateur
