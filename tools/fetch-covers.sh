@@ -13,13 +13,24 @@
 #
 #   IGIRIS_MACHINE=1        lignes « igiris:clé=valeur » analysables par l'application
 #   IGIRIS_LIMIT_RATE=1M    plafond de débit passé à curl
-#   IGIRIS_COVER_VARIANT    variante IGDB (défaut t_cover_small, 90×120, ~3,6 Ko)
+#   IGIRIS_COVER_VARIANT    variante IGDB (défaut t_cover_small, 90×120, ~3,9 Ko)
+#   IGIRIS_WITH_ARTWORK=1   ajoute les FONDS D'ÉCRAN des fiches. Mesuré, et à décider en
+#                           connaissance de cause — ce n'est pas du même ordre :
+#
+#                             vignettes  t_cover_small      3,9 Ko →   66 Mo
+#                             fonds      t_screenshot_med    30 Ko →  500 Mo
+#                             fonds      t_720p              88 Ko → 1458 Mo
+#
+#                           D'où le défaut : vignettes SEULES. Les fonds sont un confort,
+#                           les vignettes rendent la liste utilisable.
 set -euo pipefail
 
 DATA="${1:-$(cd "$(dirname "$0")/.." && pwd)/data}"
 DB="$DATA/games.db"
 DEST="$DATA/covers"
 VARIANT="${IGIRIS_COVER_VARIANT:-t_cover_small}"
+ARTWORK="${IGIRIS_WITH_ARTWORK:-}"
+ARTWORK_VARIANT="${IGIRIS_ARTWORK_VARIANT:-t_screenshot_med}"
 
 MACHINE="${IGIRIS_MACHINE:-}"
 say() { [ -n "$MACHINE" ] && echo "igiris:$1" || true; }
@@ -38,6 +49,15 @@ trap 'rm -f "$LISTE"' EXIT
 sqlite3 "$DB" \
   "SELECT game_key || ' ' || replace(cover_ref, 't_cover_big', '$VARIANT')
      FROM exp_game WHERE cover_ref IS NOT NULL AND cover_ref != '';" > "$LISTE"
+
+# Les fonds sont rangés sous un SUFFIXE de clé, jamais dans un second répertoire : le nom
+# du fichier reste la clé du jeu, et l'application n'a toujours qu'un lookup à faire (§0).
+if [ -n "$ARTWORK" ]; then
+    sqlite3 "$DB" \
+      "SELECT game_key || '-fond ' || replace(artwork_ref, 't_1080p', '$ARTWORK_VARIANT')
+         FROM exp_game WHERE artwork_ref IS NOT NULL AND artwork_ref != '';" >> "$LISTE"
+    echo "▶ fonds d'écran INCLUS ($ARTWORK_VARIANT) — comptez plusieurs centaines de Mo"
+fi
 
 total="$(wc -l < "$LISTE")"
 say "total=$total"

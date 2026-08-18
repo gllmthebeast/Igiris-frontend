@@ -23,6 +23,18 @@ const char *const kSystemsFileCandidates[] = {
 
 // Marqueurs d'une installation Batocera. On en exige UN seul : une image montée en lecture
 // seule n'expose pas forcément la partition userdata.
+// Les deux noms sous lesquels l'écran d'accueil de l'hôte peut se présenter. Servent à
+// la fois à le LANCER et à détecter qu'il TOURNE DÉJÀ — deux usages qui doivent partager
+// la même liste, sinon l'un des deux se met à mentir sans qu'on le voie.
+const char *const kHostFrontendNames[] = {
+    "emulationstation-standalone",
+    "emulationstation",
+};
+
+// Longueur maximale d'un /proc/<pid>/comm : le noyau tronque à TASK_COMM_LEN - 1.
+// « emulationstation » (16) s'y lit donc « emulationstatio » (15).
+constexpr int kCommMaxLength = 15;
+
 const char *const kDetectionMarkers[] = {
     "usr/share/batocera",
     "userdata/system",
@@ -121,12 +133,7 @@ LaunchCommand BatoceraAdapter::hostSettingsCommand() const
     // le répertoire courant, attend le compositeur et enveloppe dans dbus-run-session.
     // Refaire tout ça ici serait précisément la connaissance de distribution que le §1
     // veut voir rester chez l'hôte.
-    static const char *const candidates[] = {
-        "emulationstation-standalone",
-        "emulationstation",
-    };
-
-    for (const char *name : candidates) {
+    for (const char *name : kHostFrontendNames) {
         // D'abord sous la racine de l'adaptateur : c'est ce qui rend le cas testable sur
         // une image montée, sans rien exécuter de la machine hôte.
         const QString local = absolutePath(QStringLiteral("usr/bin/%1").arg(
@@ -136,7 +143,7 @@ LaunchCommand BatoceraAdapter::hostSettingsCommand() const
     }
 
     // Puis le PATH, pour le cas normal d'un appareil où l'adaptateur est enraciné sur « / ».
-    for (const char *name : candidates) {
+    for (const char *name : kHostFrontendNames) {
         const QString found = QStandardPaths::findExecutable(QLatin1String(name));
         if (!found.isEmpty())
             return { found, {}, {} };
@@ -177,10 +184,22 @@ bool BatoceraAdapter::hostFrontendIsRunning() const
         if (!comm.open(QIODevice::ReadOnly | QIODevice::Text))
             continue;
         const QString name = QString::fromLatin1(comm.readLine()).trimmed();
-        // « emulationstation » comme « emulationstation-standalone » : les deux signifient
-        // que l'écran d'accueil d'origine occupe déjà la machine.
-        if (name.startsWith(QLatin1String("emulationstation")))
-            return true;
+
+        // ⚠️ /proc/<pid>/comm est TRONQUÉ À 15 CARACTÈRES par le noyau (TASK_COMM_LEN
+        // vaut 16, terminateur compris). Le vrai processus s'y présente donc comme
+        // « emulationstatio », sans le « n » final.
+        //
+        // La 1.11.0 comparait au nom complet, seize caractères : la détection ne
+        // pouvait JAMAIS aboutir, et le mode « port » n'a jamais été reconnu — d'où
+        // deux igiris lancés en même temps sur l'appareil.
+        //
+        // Le test ne l'a pas vu parce qu'il ÉCRIVAIT « emulationstation » en entier dans
+        // son faux /proc : il fabriquait un fichier que le noyau ne produit pas. Un faux
+        // qui ne reproduit pas la contrainte de l'original ne prouve rien.
+        for (const char *candidate : kHostFrontendNames) {
+            if (name == QLatin1String(candidate).left(kCommMaxLength))
+                return true;
+        }
     }
     return false;
 }

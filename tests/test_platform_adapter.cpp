@@ -493,8 +493,17 @@ void TestPlatformAdapter::hostFrontend_detectedWhenAlreadyRunning()
 
     // Lancé DEPUIS l'hôte — en « port » — : il tourne, et en ouvrir un second ferait
     // s'affronter deux frontends pour le même écran. Le bouton doit alors nous fermer.
+    //
+    // ⚠️ « emulationstatio », TRONQUÉ À 15 CARACTÈRES, et c'est le cœur de ce test.
+    // Le noyau limite /proc/<pid>/comm à TASK_COMM_LEN - 1 : le vrai processus ne s'y
+    // présente JAMAIS avec son nom complet.
+    //
+    // La version précédente de ce test écrivait le nom entier — un fichier que le noyau
+    // ne produit pas. Il passait donc au vert sur du code qui ne pouvait pas fonctionner,
+    // et deux igiris se sont retrouvés lancés en même temps sur l'appareil. Un faux qui ne
+    // reproduit pas la contrainte de l'original ne prouve rien.
     QDir(dir.path()).mkpath(QStringLiteral("proc/77"));
-    QVERIFY(writeComm(QStringLiteral("77"), "emulationstation"));
+    QVERIFY(writeComm(QStringLiteral("77"), "emulationstatio"));
     QVERIFY(adapter.hostFrontendIsRunning());
 
     // Le libellé change AVEC le comportement : un même bouton qui fait deux choses doit
@@ -502,9 +511,16 @@ void TestPlatformAdapter::hostFrontend_detectedWhenAlreadyRunning()
     QVERIFY(adapter.hostReturnLabel().contains(adapter.displayName()));
     QVERIFY(adapter.hostReturnLabel() != adapter.hostSettingsLabel());
 
-    // La variante « -standalone » compte aussi : c'est le même écran d'accueil.
+    // Le nom COMPLET ne doit pas être exigé — mais il ne doit pas non plus être le seul
+    // reconnu : c'est ce que ce test vérifiait à tort auparavant.
     QFile::remove(dir.filePath(QStringLiteral("proc/77/comm")));
-    QVERIFY(writeComm(QStringLiteral("77"), "emulationstation-standalone"));
+    QVERIFY(writeComm(QStringLiteral("77"), "emulationstation"));
+    QVERIFY(!adapter.hostFrontendIsRunning());
+
+    // La variante « -standalone » compte aussi : c'est le même écran d'accueil, et le
+    // noyau la tronque au même endroit.
+    QFile::remove(dir.filePath(QStringLiteral("proc/77/comm")));
+    QVERIFY(writeComm(QStringLiteral("77"), "emulationstatio"));
     QVERIFY(adapter.hostFrontendIsRunning());
 
     // Et surtout : la détection lit des PROCESSUS, pas un fichier drapeau. Le wrapper laisse

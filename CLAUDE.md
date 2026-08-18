@@ -615,6 +615,24 @@ de l'hôte laisse `/var/run/emulationstation-standalone` derrière lui après un
 fier ferait prendre une trace périmée pour un frontend vivant, et le bouton fermerait
 l'application au lieu d'ouvrir les réglages.
 
+> ⚠️ **`/proc/<pid>/comm` est TRONQUÉ À 15 CARACTÈRES** par le noyau (`TASK_COMM_LEN` vaut
+> 16, terminateur compris). Le processus s'y présente comme **`emulationstatio`**, sans son
+> `n` final.
+>
+> La 1.11.0 comparait au nom complet — seize caractères — donc la détection ne pouvait
+> **jamais** aboutir : le mode « port » n'a jamais été reconnu, et **deux igiris se sont
+> retrouvés lancés en même temps** sur l'appareil.
+>
+> Le test ne l'a pas vu parce qu'il **écrivait le nom entier dans son faux `/proc`** : il
+> fabriquait un fichier que le noyau ne produit pas. **Un faux qui ne reproduit pas la
+> contrainte de l'original ne prouve rien** — c'est la leçon, et elle vaut au-delà de ce
+> cas.
+
+**Et le port refuse de démarrer un second igiris.** La détection ci-dessus protège le
+bouton ; elle ne protège pas l'entrée Ports elle-même, qu'un utilisateur ayant installé les
+deux modes peut lancer alors qu'igiris est déjà l'écran d'accueil. Le script le constate et
+le **dit**, plutôt que de sortir en silence devant un écran qui ne change pas.
+
 **Le libellé change avec le comportement.** Un même bouton qui fait deux choses doit dire
 laquelle — sinon l'utilisateur appuie en croyant ouvrir les réglages.
 
@@ -870,8 +888,8 @@ C'est tout. **Déterministe, rapide, hors ligne.**
   bandeau). Les **vignettes** se mettent désormais en cache localement (§14.2) : l'appareil
   les cherche lui-même à la source, donc **rien n'est redistribué** et la question des
   droits ne se pose plus. ~66 Mo, ~6 minutes, reprenable.
-  **Les fonds d'écran restent distants** : 2,5 Go pour le catalogue, hors de proportion. La
-  fiche s'affiche sans eux.
+  **Les fonds d'écran sont optionnels** : 500 Mo au minimum, contre 66 pour les vignettes.
+  Non installés par défaut ; la fiche s'affiche très bien sans eux.
 - **Le synopsis est en anglais**, sur une interface française. IGDB n'en fournit pas de
   traduit ; le backend l'a vérifié plutôt que supposé. Mieux vaut le texte réel que rien,
   mais la fiche ne le présente pas comme localisé.
@@ -1061,8 +1079,20 @@ et garde le résultat. Héberger un pack nous-mêmes nous ferait passer d'affich
 > ⚠️ **Le chiffre de « 27 Mo » qui circulait était périmé** : il valait pour le catalogue à
 > 7 580 jeux. Il en fait 17 357 depuis le 1.7.0.
 
-**Les FONDS d'écran ne sont pas cachables** : 152 Ko en moyenne, soit **2,5 Go** pour le
-catalogue. Ils restent distants, et la fiche s'affiche sans eux.
+**Les FONDS d'écran sont OPTIONNELS** (`IGIRIS_WITH_ARTWORK=1`), et pas du même ordre —
+mesuré sur 40 fonds tirés au hasard :
+
+| Variante IGDB | Poids unitaire | Pack de 16 904 |
+|---|---|---|
+| `t_screenshot_med` (569×320) — **défaut si activé** | 30 Ko | **≈ 500 Mo** |
+| `t_720p` (1280×720) | 88 Ko | ≈ 1,5 Go |
+| `t_1080p` (l'original de l'export) | 152 Ko | ≈ 2,5 Go |
+
+Les vignettes rendent la liste **utilisable** ; les fonds sont un **confort**. Les mettre
+sur le même plan aurait été malhonnête, d'où le défaut : vignettes seules.
+
+Ils sont rangés sous `<clé>-fond.jpg`, dans le même répertoire — le nom du fichier reste la
+clé du jeu, et il n'y a toujours qu'un lookup à faire.
 
 **Quatre tâches en parallèle, pas davantage.** Ces requêtes partent vers un service tiers
 que nous n'exploitons pas ; en ouvrir vingt par appareil serait discourtois et se ferait

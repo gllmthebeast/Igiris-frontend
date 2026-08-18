@@ -125,6 +125,20 @@ void GameDetailModel::setGame(const QString &gameKey)
                     m_coverRef = QStringLiteral("file://") + local;
             }
             m_artworkRef = game->artworkRef;
+
+            // Le fond local, s'il a été mis en cache. Rangé sous « <clé>-fond.jpg » et non
+            // dans un second répertoire : le nom du fichier reste la clé du jeu, et il n'y
+            // a toujours qu'un lookup à faire (§0).
+            //
+            // Optionnel et non installé par défaut : 500 Mo au minimum, contre 66 pour les
+            // vignettes. Les vignettes rendent la liste utilisable, les fonds sont un
+            // confort — les mettre sur le même plan aurait été malhonnête.
+            if (!m_coversDir.isEmpty() && !m_artworkRef.isEmpty()) {
+                const QString local =
+                    QStringLiteral("%1/%2-fond.jpg").arg(m_coversDir, gameKey);
+                if (QFileInfo::exists(local))
+                    m_artworkRef = QStringLiteral("file://") + local;
+            }
             m_summary    = game->summary;
 
             // Les libellés viennent du référentiel, jamais d'une table écrite ici : le
