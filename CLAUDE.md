@@ -598,6 +598,46 @@ EmulationStation », ce que personne ne devinerait. L'adaptateur fournit la phra
 (`hostSettingsReturnHint()`), affichée au moment où on rend l'écran — le seul instant où
 elle sert.
 
+### 7.1.1 — Deux façons d'être lancé, deux comportements
+
+Le même bouton ne peut pas faire la même chose selon la façon dont on a démarré.
+
+| Lancé | Ce que fait le bouton | Libellé |
+|---|---|---|
+| **au démarrage**, à la place de l'écran d'accueil | ouvre l'écran d'accueil de l'hôte | « Paramètres <hôte> » |
+| **depuis** l'écran d'accueil (en « port ») | **ferme l'application**, ce qui lui rend la main | « Retour à <hôte> » |
+
+Sans cette distinction, un frontend lancé en port ouvrirait un **second** écran d'accueil :
+deux frontends se disputant le même affichage.
+
+La détection lit les **processus** (`/proc/*/comm`), et pas un fichier drapeau. Le wrapper
+de l'hôte laisse `/var/run/emulationstation-standalone` derrière lui après un plantage ; s'y
+fier ferait prendre une trace périmée pour un frontend vivant, et le bouton fermerait
+l'application au lieu d'ouvrir les réglages.
+
+**Le libellé change avec le comportement.** Un même bouton qui fait deux choses doit dire
+laquelle — sinon l'utilisateur appuie en croyant ouvrir les réglages.
+
+### 7.1.2 — Le « port » : le chemin d'installation simple
+
+`es_systems.cfg` déclare un système `ports` (`/userdata/roms/ports`, extension `.sh`). Un
+script déposé là **apparaît dans l'écran d'accueil de l'hôte comme une entrée lançable**.
+
+C'est le point d'extension officiel qu'on cherchait, et il coche tout :
+
+- aucun droit root, aucun remontage de racine, aucun `batocera-save-overlay` ;
+- **la chaîne de démarrage n'est pas touchée** — l'hôte démarre comme avant ;
+- tout vit dans `/userdata`, qui survit aux mises à jour du système ;
+- désinstallation = supprimer un fichier.
+
+D'où un déploiement **à deux étages** : *essayer* (le port, risque nul, réversible) puis
+*adopter* (l'installateur, qui touche à la chaîne de démarrage). Jusqu'au 1.11.0 on n'avait
+que le second, ce qui est beaucoup demander à quelqu'un qui découvre.
+
+> ⚠️ **Un thème ne peut pas faire ça.** Un thème ne fait que restyler l'écran d'accueil de
+> l'hôte — XML de mise en page, images, polices. Il ne peut ni embarquer un binaire, ni le
+> lancer. C'est un habillage, pas un véhicule.
+
 ### 7.2 — La porte de sortie, au démarrage
 
 **Si le frontend ne démarre pas, l'utilisateur n'a plus aucune interface.** Écran noir,

@@ -37,6 +37,8 @@ public:
     bool          openHostSettings(QString *error) const override;
     QString       hostSettingsLabel() const override;
     QString       hostSettingsReturnHint() const override;
+    bool          hostFrontendIsRunning() const override;
+    QString       hostReturnLabel() const override;
 
 private:
     // Rendre EmulationStation quittable, le temps d'une visite. Voir le commentaire dans

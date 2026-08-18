@@ -113,6 +113,24 @@ LANCEUR
 chmod +x "$START_DST"
 echo "✓ lanceur installé : $START_DST (repli sur $ES_CMD)"
 
+# ------------------------------------------------------- entrée « port »
+#
+# Déposée en plus, et sans condition : elle ne coûte rien et couvre le cas où l'utilisateur
+# veut revenir à EmulationStation comme écran d'accueil tout en gardant igiris à portée.
+#
+# C'est aussi le mode d'installation le plus simple pris isolément — voir igiris.sh, qui
+# peut être déposé SEUL, sans jamais toucher à la chaîne de démarrage.
+PORT_SRC="$(dirname "$0")/igiris.sh"
+PORT_DST="/userdata/roms/ports/igiris.sh"
+if [ -f "$PORT_SRC" ]; then
+    mkdir -p /userdata/roms/ports
+    cp -f "$PORT_SRC" "$PORT_DST"
+    chmod +x "$PORT_DST"
+    echo "✓ entrée Ports installée : $PORT_DST"
+else
+    echo "⚠ igiris.sh introuvable à côté de ce script — entrée Ports non installée" >&2
+fi
+
 # Conserver l'original AVANT de toucher à quoi que ce soit : c'est ce qui rend le
 # retour en arrière possible.
 if [ ! -f "$BACKUP" ]; then

@@ -80,6 +80,7 @@ private slots:
     void hostSettings_labelNamesTheHost();
     void hostSettings_refusesClearlyWhenAbsent();
     void hostSettings_tellTheUserHowToComeBack();
+    void hostFrontend_detectedWhenAlreadyRunning();
 
     // ------------------------------------------------------- (4) lancement
     void launch_reallyRunsTheCommand();
@@ -468,6 +469,50 @@ void TestPlatformAdapter::hostSettings_tellTheUserHowToComeBack()
     QVERIFY(!hint.isEmpty());
     QVERIFY(hint.contains(QStringLiteral("Redémarrer EmulationStation")));
     QVERIFY(hint.contains(adapter.displayName()));
+}
+
+void TestPlatformAdapter::hostFrontend_detectedWhenAlreadyRunning()
+{
+    QTemporaryDir dir;
+    QDir(dir.path()).mkpath(QStringLiteral("usr/share/batocera"));
+    QDir(dir.path()).mkpath(QStringLiteral("proc/42"));
+    BatoceraAdapter adapter(dir.path());
+
+    const auto writeComm = [&dir](const QString &pid, const QByteArray &name) {
+        QFile comm(dir.filePath(QStringLiteral("proc/%1/comm").arg(pid)));
+        if (!comm.open(QIODevice::WriteOnly))
+            return false;
+        comm.write(name + "\n");
+        return true;
+    };
+
+    // Un processus quelconque : l'écran d'accueil de l'hôte ne tourne PAS. Le frontend a
+    // donc été lancé À SA PLACE, et le bouton doit ouvrir les réglages.
+    QVERIFY(writeComm(QStringLiteral("42"), "bash"));
+    QVERIFY(!adapter.hostFrontendIsRunning());
+
+    // Lancé DEPUIS l'hôte — en « port » — : il tourne, et en ouvrir un second ferait
+    // s'affronter deux frontends pour le même écran. Le bouton doit alors nous fermer.
+    QDir(dir.path()).mkpath(QStringLiteral("proc/77"));
+    QVERIFY(writeComm(QStringLiteral("77"), "emulationstation"));
+    QVERIFY(adapter.hostFrontendIsRunning());
+
+    // Le libellé change AVEC le comportement : un même bouton qui fait deux choses doit
+    // dire laquelle. Sans ça, l'utilisateur appuie en croyant ouvrir les réglages.
+    QVERIFY(adapter.hostReturnLabel().contains(adapter.displayName()));
+    QVERIFY(adapter.hostReturnLabel() != adapter.hostSettingsLabel());
+
+    // La variante « -standalone » compte aussi : c'est le même écran d'accueil.
+    QFile::remove(dir.filePath(QStringLiteral("proc/77/comm")));
+    QVERIFY(writeComm(QStringLiteral("77"), "emulationstation-standalone"));
+    QVERIFY(adapter.hostFrontendIsRunning());
+
+    // Et surtout : la détection lit des PROCESSUS, pas un fichier drapeau. Le wrapper laisse
+    // /var/run/emulationstation-standalone derrière lui après un plantage ; s'y fier ferait
+    // prendre une trace périmée pour un frontend vivant, et le bouton fermerait
+    // l'application au lieu d'ouvrir les réglages.
+    QFile::remove(dir.filePath(QStringLiteral("proc/77/comm")));
+    QVERIFY(!adapter.hostFrontendIsRunning());
 }
 
 QTEST_GUILESS_MAIN(TestPlatformAdapter)

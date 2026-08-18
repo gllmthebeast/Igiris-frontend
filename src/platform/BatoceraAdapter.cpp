@@ -150,6 +150,46 @@ QString BatoceraAdapter::hostSettingsLabel() const
     return QStringLiteral("Paramètres %1").arg(displayName());
 }
 
+bool BatoceraAdapter::hostFrontendIsRunning() const
+{
+    // Lu dans /proc, et non déduit d'un fichier drapeau.
+    //
+    // Le wrapper pose bien /var/run/emulationstation-standalone, mais ce drapeau SURVIT à
+    // un plantage : on prendrait alors une trace périmée pour un frontend vivant, et le
+    // bouton se mettrait à quitter l'application au lieu d'ouvrir les réglages. Un
+    // processus, lui, est là ou n'est pas là.
+    //
+    // Le préfixe de racine rend la chose testable sans dépendre des processus de la
+    // machine de développement — c'est aussi ce qui fait que ce test ne peut pas passer
+    // par accident.
+    QDir proc(absolutePath(QStringLiteral("proc")));
+    if (!proc.exists())
+        return false;
+
+    const auto entries = proc.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QString &entry : entries) {
+        bool isPid = false;
+        entry.toInt(&isPid);
+        if (!isPid)
+            continue;
+
+        QFile comm(proc.filePath(entry + QStringLiteral("/comm")));
+        if (!comm.open(QIODevice::ReadOnly | QIODevice::Text))
+            continue;
+        const QString name = QString::fromLatin1(comm.readLine()).trimmed();
+        // « emulationstation » comme « emulationstation-standalone » : les deux signifient
+        // que l'écran d'accueil d'origine occupe déjà la machine.
+        if (name.startsWith(QLatin1String("emulationstation")))
+            return true;
+    }
+    return false;
+}
+
+QString BatoceraAdapter::hostReturnLabel() const
+{
+    return QStringLiteral("Retour à %1").arg(displayName());
+}
+
 QString BatoceraAdapter::hostSettingsReturnHint() const
 {
     // Le libellé exact du menu de l'hôte, qu'on ne peut pas renommer et que personne ne

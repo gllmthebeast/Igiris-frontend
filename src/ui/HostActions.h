@@ -39,6 +39,13 @@ class HostActions : public QObject
     // Comment REVENIR ici depuis les réglages, dans les mots de l'hôte. Affiché au moment
     // où on lui rend l'écran — c'est le seul instant où ça sert.
     Q_PROPERTY(QString returnHint READ returnHint NOTIFY adapterChanged)
+    // Vrai quand ce frontend a été lancé DEPUIS l'écran d'accueil de l'hôte, au lieu de
+    // l'avoir remplacé. Le bouton doit alors QUITTER l'application plutôt qu'en lancer un
+    // second : deux écrans d'accueil se disputeraient l'affichage.
+    //
+    // Le libellé change avec lui — « Retour à … » au lieu de « Paramètres … ». Un même
+    // bouton qui fait deux choses doit dire laquelle.
+    Q_PROPERTY(bool returnsToHost READ returnsToHost NOTIFY adapterChanged)
 
 public:
     explicit HostActions(QObject *parent = nullptr);
@@ -49,6 +56,7 @@ public:
     QString settingsLabel() const;
     QString unavailableReason() const;
     QString returnHint() const;
+    bool    returnsToHost() const;
 
     // Rend l'écran à l'interface de réglages de l'hôte. Retourne un message d'erreur
     // COMPLET, vide en cas de succès (§15) — même convention que le lancement d'un jeu.

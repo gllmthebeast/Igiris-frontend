@@ -177,6 +177,13 @@ Window {
     }
 
     function openHostSettings() {
+        // Lancé DEPUIS l'écran d'accueil de l'hôte — en « port » — : on se ferme, ce qui
+        // lui rend la main. En lancer un second ferait s'affronter deux frontends pour le
+        // même écran.
+        if (host.returnsToHost) {
+            Qt.quit()
+            return
+        }
         if (!host.settingsAvailable) {
             hostMessage.text = qsTr("Réglages indisponibles : %1").arg(host.unavailableReason)
             return

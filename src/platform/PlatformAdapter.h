@@ -198,6 +198,22 @@ public:
     // capacité n'est pas déclarée.
     virtual QString hostSettingsLabel() const { return {}; }
 
+    // L'écran d'accueil de l'hôte TOURNE-T-IL DÉJÀ ?
+    //
+    // Vrai quand ce frontend a été lancé DEPUIS lui — en « port » déposé dans les ROMs,
+    // plutôt qu'au démarrage à sa place. Dans ce cas, ouvrir les réglages en lancerait un
+    // SECOND : deux écrans d'accueil se disputant l'affichage. Le bon geste est alors de
+    // se terminer, ce qui rend la main à celui qui nous a lancés.
+    //
+    // Ce n'est pas un détail d'implémentation : c'est ce qui rend le déploiement « essayer
+    // sans rien casser » possible, et sans cette détection le bouton deviendrait un piège.
+    virtual bool hostFrontendIsRunning() const { return false; }
+
+    // Libellé du bouton QUAND on est lancé depuis l'hôte — « Retour à Batocera » et non
+    // « Paramètres ». Le libellé DIT ce qui va se passer ; c'est la seule façon honnête de
+    // présenter deux comportements sous un même bouton.
+    virtual QString hostReturnLabel() const { return {}; }
+
     // COMMENT on revient, dit dans les mots de l'hôte. Vide s'il n'y a rien à expliquer.
     //
     // Ce n'est pas du confort : sur certaines distributions, l'entrée de menu qui ramène
