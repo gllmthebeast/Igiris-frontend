@@ -111,7 +111,53 @@ private slots:
     void scan_ignoresNonGameFiles();
     void scan_reportsUnidentified();
     void scan_secondPassUsesCache();
+
+    // --- export 1.9.0 : la troisième voie, par nom de fichier ---
+    void scan_identifiesByFileNameWhenNoCrcExists();
+    void scan_crcWinsOverFileName();
+    void scan_fileNameIgnoredOnPlatformsThatDoNotDeclareIt();
 };
+
+namespace {
+
+// Greffe la table du 1.9.0 sur un export déjà construit. `crcToo` ajoute EN PLUS un hash
+// pour le même fichier — c'est ce qui met la règle de précédence à l'épreuve.
+bool addGameFiles(const QString &path, const QString &crcToo = QString())
+{
+    sqlite3 *db = nullptr;
+    if (sqlite3_open(path.toUtf8().constData(), &db) != SQLITE_OK)
+        return false;
+
+    QString sql = QStringLiteral(
+        "CREATE TABLE exp_game_file(file_key TEXT NOT NULL, batocera_system TEXT NOT NULL,"
+        " game_key TEXT NOT NULL, collection TEXT,"
+        " PRIMARY KEY(file_key, batocera_system)) WITHOUT ROWID;"
+        "INSERT INTO exp_game VALUES('igdb-dos','Gabriel Knight 2 (1995)',"
+        " 'gabriel knight 2',1995,NULL,85);"
+        // La clé porte l'année, comme en production : elle désambiguïse les rééditions, et
+        // c'est ce qu'on a demandé au backend de conserver.
+        "INSERT INTO exp_game_file VALUES('gabriel knight 2 (1995)','dos','igdb-dos',"
+        " 'eXoDOS');");
+
+    if (!crcToo.isEmpty()) {
+        // MÊME jeu, MÊME plateforme, identifiable des deux façons. C'est le cas réel de
+        // `dos` : 678 jeux par CRC, des centaines d'autres par nom seulement.
+        sql += QStringLiteral("INSERT INTO exp_game VALUES('igdb-dos-crc','Le jeu du CRC',"
+                              "'crc',1990,NULL,70);"
+                              "INSERT INTO exp_rom_hash VALUES('%1','dos','igdb-dos-crc',0);")
+                   .arg(crcToo);
+    }
+
+    char      *errmsg = nullptr;
+    const bool ok = sqlite3_exec(db, sql.toUtf8().constData(), nullptr, nullptr, &errmsg)
+                    == SQLITE_OK;
+    if (errmsg)
+        sqlite3_free(errmsg);
+    sqlite3_close(db);
+    return ok;
+}
+
+} // namespace
 
 // ------------------------------------------------------------------------- RomHasher
 
@@ -376,6 +422,111 @@ void TestRomScanner::scan_secondPassUsesCache()
     QCOMPARE(second.hashed, 0);
     QCOMPARE(second.cacheHits, 1);
     QCOMPARE(second.identified.size(), 1);
+}
+
+void TestRomScanner::scan_identifiesByFileNameWhenNoCrcExists()
+{
+    QTemporaryDir dir;
+    const QString exportPath = dir.filePath("games.db");
+    QVERIFY(buildExport(exportPath, {}));
+    QVERIFY(addGameFiles(exportPath));
+
+    // Le contenu du fichier n'a AUCUNE importance ici, et c'est tout le sujet : eXoDOS est
+    // distribué par torrent, et un torrent ne hache pas les fichiers. Il n'existe aucun
+    // CRC à retrouver — seul le nom identifie.
+    QDir(dir.path()).mkpath(QStringLiteral("roms/dos"));
+    QFile rom(dir.filePath("roms/dos/Gabriel Knight 2 (1995).zip"));
+    QVERIFY(rom.open(QIODevice::WriteOnly));
+    rom.write("ceci n'est pas un vrai zip, et ça n'a aucune importance");
+    rom.close();
+
+    ExportDatabase db;
+    QVERIFY(db.open(exportPath, nullptr));
+    RomScanner scanner(db);
+
+    const QList<ScanTarget> targets = { { QStringLiteral("dos"),
+                                          dir.filePath("roms/dos") } };
+    const auto              report  = scanner.scan(targets);
+
+    QCOMPARE(report.identified.size(), 1);
+    const auto &rom0 = report.identified.first();
+    QCOMPARE(rom0.gameKey, QStringLiteral("igdb-dos"));
+    QCOMPARE(rom0.kind, MatchKind::FileName);
+    // La casse du fichier ne compte pas, l'année si : la clé est le nom tel qu'il est
+    // distribué, en minuscules, sans sa dernière extension.
+    QCOMPARE(rom0.fileKey, QStringLiteral("gabriel knight 2 (1995)"));
+    QCOMPARE(rom0.collection, QStringLiteral("eXoDOS"));
+    // Aucun CRC : rien n'a été haché, et c'est normal.
+    QVERIFY(rom0.crc32.isEmpty());
+}
+
+void TestRomScanner::scan_crcWinsOverFileName()
+{
+    QTemporaryDir dir;
+    const QString exportPath = dir.filePath("games.db");
+
+    // Un vrai fichier, avec un vrai CRC, sur une plateforme qui relève des DEUX voies.
+    QDir(dir.path()).mkpath(QStringLiteral("roms/dos"));
+    const QString romPath = dir.filePath("roms/dos/Gabriel Knight 2 (1995).bin");
+    QFile         rom(romPath);
+    QVERIFY(rom.open(QIODevice::WriteOnly));
+    rom.write("contenu identifiable par son empreinte");
+    rom.close();
+
+    const auto hashed = igiris::scan::crc32OfFile(romPath, 0);
+    QVERIFY(hashed.ok);
+
+    QVERIFY(buildExport(exportPath, {}));
+    // Le MÊME fichier est déclaré des deux façons, vers DEUX jeux différents. C'est
+    // artificiel, et c'est exactement ce qu'il faut pour que le test tranche.
+    QVERIFY(addGameFiles(exportPath, hashed.crc32));
+
+    ExportDatabase db;
+    QVERIFY(db.open(exportPath, nullptr));
+    RomScanner scanner(db);
+
+    const auto report = scanner.scan({ { QStringLiteral("dos"),
+                                         dir.filePath("roms/dos") } });
+
+    QCOMPARE(report.identified.size(), 1);
+    const auto &found = report.identified.first();
+
+    // LE test de cette version. Le CRC identifie un CONTENU, le nom identifie un contenant
+    // que n'importe qui peut renommer : quand les deux répondent, c'est le nom qui a tort.
+    // C'est la précédence défendue au backend, et sans ce test elle peut s'inverser un jour
+    // sans que rien ne le signale.
+    QCOMPARE(found.gameKey, QStringLiteral("igdb-dos-crc"));
+    QCOMPARE(found.kind, MatchKind::Crc);
+    QCOMPARE(found.crc32, hashed.crc32);
+    QVERIFY(found.fileKey.isEmpty());
+}
+
+void TestRomScanner::scan_fileNameIgnoredOnPlatformsThatDoNotDeclareIt()
+{
+    QTemporaryDir dir;
+    const QString exportPath = dir.filePath("games.db");
+    QVERIFY(buildExport(exportPath, {}));
+    QVERIFY(addGameFiles(exportPath));
+
+    // Le même nom de fichier, mais rangé sous « snes » — que exp_game_file ne déclare pas.
+    // Il ne doit RIEN identifier : la voie par nom est réservée aux plateformes que
+    // l'export désigne, jamais appliquée partout « au cas où ».
+    QDir(dir.path()).mkpath(QStringLiteral("roms/snes"));
+    QFile rom(dir.filePath("roms/snes/Gabriel Knight 2 (1995).sfc"));
+    QVERIFY(rom.open(QIODevice::WriteOnly));
+    rom.write("peu importe");
+    rom.close();
+
+    ExportDatabase db;
+    QVERIFY(db.open(exportPath, nullptr));
+    QCOMPARE(db.fileNamePlatformKeys(), QStringList({ QStringLiteral("dos") }));
+
+    RomScanner scanner(db);
+    const auto report = scanner.scan({ { QStringLiteral("snes"),
+                                         dir.filePath("roms/snes") } });
+
+    QVERIFY(report.identified.isEmpty());
+    QCOMPARE(report.unidentified.size(), 1);
 }
 
 QTEST_GUILESS_MAIN(TestRomScanner)

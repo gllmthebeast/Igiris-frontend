@@ -33,7 +33,8 @@ enum class MatchKind {
     CrcHeaderSkip, // CRC après avoir ignoré l'en-tête déclaré par l'export
     CrcSmcHeuristic, // CRC après les 512 octets du SMC — heuristique locale (§4)
     ZipEntryCrc,   // CRC lu dans l'annuaire du zip, sans décompression
-    Romset,        // arcade, par nom de fichier
+    Romset,        // arcade, par nom de romset
+    FileName,      // DOS / Windows 3.x, par nom de fichier (export 1.9.0)
 };
 
 struct IdentifiedRom {
@@ -41,8 +42,10 @@ struct IdentifiedRom {
     QString   platformKey;
     QString   gameKey;
     QString   title;
-    QString   crc32;  // vide pour l'arcade
+    QString   crc32;  // vide pour l'arcade et pour l'identification par nom
     QString   romset; // renseigné pour l'arcade seulement
+    QString   fileKey;    // renseigné pour l'identification par nom seulement
+    QString   collection; // « eXoDOS », « eXoWin3x » — d'où vient l'entrée
     MatchKind kind = MatchKind::Crc;
 };
 
@@ -73,11 +76,25 @@ private:
     void identifyArchive(const QString &path, const ScanTarget &target, ScanReport &report);
     void identifyArcade(const QString &path, const ScanTarget &target, ScanReport &report);
 
+    // Troisième voie, export 1.9.0. Retourne vrai si le fichier a été identifié — c'est ce
+    // qui permet de l'ESSAYER APRÈS le CRC plutôt qu'à sa place.
+    bool identifyByFileName(const QString &path, const ScanTarget &target,
+                            ScanReport &report);
+
     QString cachedOrComputedCrc(const QString &path, ScanReport &report);
 
     const catalog::ExportDatabase &m_db;
     ScanCache                     *m_cache = nullptr;
+    // Deux listes DISTINCTES, et c'est le point de conception de cette version.
+    //
+    // m_arcadeKeys sert aussi, ailleurs, à décider si un jeu est « arcade » en vue liste :
+    // y verser les plateformes DOS aurait fait passer le filtre « Type : arcade » de 833 à
+    // 1 536 jeux, sans erreur ni message. m_fileNameKeys ne sort jamais du scanner.
+    //
+    // Une plateforme peut figurer dans les deux : `dos` relève des DEUX voies — 678 jeux
+    // par CRC, ~700 de plus par nom.
     QStringList                    m_arcadeKeys;
+    QStringList                    m_fileNameKeys;
     QHash<QString, int>            m_headerSkips;
 };
 

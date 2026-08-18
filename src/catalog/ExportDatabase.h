@@ -159,6 +159,21 @@ struct RomsetMatch {
     QString driverStatus;
 };
 
+// Un jeu identifié par NOM DE FICHIER — export 1.9.0.
+//
+// Troisième et dernière voie d'identification, après le CRC (consoles) et le nom de romset
+// (arcade). Elle existe parce que des collections entières n'ont AUCUNE empreinte : eXoDOS
+// et eXoWin3x ne se distribuent que par torrent, et un torrent ne hache pas les fichiers —
+// c'est une propriété du format BitTorrent, pas une lacune de la source.
+//
+// Le nom, lui, est exact et vient de la source officielle. C'est le même raisonnement que
+// pour l'arcade (§4) : le contenant se renomme, le nom d'un jeu distribué ne bouge pas.
+struct GameFileMatch {
+    QString gameKey;
+    QString title;
+    QString collection; // « eXoDOS », « eXoWin3x » — d'où vient l'entrée
+};
+
 // Une langue du référentiel — export 1.4.0, §8.
 //
 // `bitIndex` vaut -1 quand l'export ne lui attribue AUCUN bit. Ce n'est pas une erreur :
@@ -238,6 +253,15 @@ public:
     std::optional<RomsetMatch> findByRomset(const QString &romset,
                                             const QString &platformKey) const;
 
+    // Identifier un jeu par son NOM DE FICHIER — export 1.9.0, DOS et Windows 3.x.
+    //
+    // `fileKey` est le nom SANS sa dernière extension, en minuscules, et RIEN D'AUTRE :
+    // exactement ce que produit QFileInfo::completeBaseName().toLower(). Le backend
+    // applique la même règle, à la lettre — il avait proposé de replier aussi les espaces,
+    // ce qui aurait fait échouer en silence tout fichier portant un espace double.
+    std::optional<GameFileMatch> findByFileName(const QString &fileKey,
+                                                const QString &platformKey) const;
+
     // §3, requête 3 — recherche par nom. `needle` est comparé au search_key normalisé.
     QList<Game> searchByName(const QString &needle, int limit = 50) const;
 
@@ -262,7 +286,23 @@ public:
     // Plateformes identifiées par NOM DE ROMSET et non par CRC (§4). Déduit de l'export
     // lui-même plutôt que d'une liste en dur : si le backend ajoute une plateforme
     // d'arcade, le scanner la traite sans qu'on touche au code.
+    //
+    // ⚠️ Cette liste ne sert PAS qu'au scanner : elle alimente aussi `isArcade` en vue
+    // liste, donc le filtre « Type : arcade » du §6. C'est pour ça que les jeux DOS ont
+    // leur propre table plutôt que d'être ajoutés à exp_romset — mesuré, ils auraient fait
+    // passer ce filtre de 833 à 1 536 jeux, sans erreur ni message.
     QStringList arcadePlatformKeys() const;
+
+    // Plateformes identifiées par NOM DE FICHIER — export 1.9.0. Distincte de la
+    // précédente, et c'est tout l'enjeu : elle ne sert QU'AU SCANNER, jamais à l'affichage.
+    //
+    // Une plateforme peut figurer dans les deux listes, ou dans aucune. `dos` relève des
+    // DEUX voies : 678 jeux par CRC, ~700 de plus par nom.
+    QStringList fileNamePlatformKeys() const;
+
+    // Vrai à partir de l'export 1.9.0. Faux avant : la troisième voie n'existe pas, et le
+    // scanner s'en tient aux deux autres.
+    bool hasGameFiles() const { return m_hasGameFiles; }
 
     // Octets d'en-tête à ignorer, par plateforme. Vient également de l'export : aujourd'hui
     // nes=16, atari7800=128, lynx=64. Aucune table codée en dur ici.
@@ -272,6 +312,11 @@ public:
     // La fiche de jeu (§7) en a besoin pour dire quelle release apporte quoi.
     QList<RomHash> romHashesForGame(const QString &gameKey) const;
     QList<Romset>  romsetsForGame(const QString &gameKey) const;
+
+    // Les noms de fichiers connus pour ce jeu — export 1.9.0. Symétrique des deux
+    // précédentes : c'est ce qui rend l'aller-retour vérifiable, du catalogue vers le
+    // lookup et retour.
+    QList<QPair<QString, QString>> gameFilesForGame(const QString &gameKey) const;
 
     // --- langues (§8) — export 1.4.0 -----------------------------------------------------
     //
@@ -368,6 +413,7 @@ private:
     bool       m_hasModes       = false;
     bool       m_hasCatalogLanguages = false;
     bool       m_hasAliases          = false;
+    bool       m_hasGameFiles        = false;
 };
 
 } // namespace igiris::catalog

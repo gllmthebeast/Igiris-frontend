@@ -135,6 +135,8 @@ bool ExportDatabase::open(const QString &path, QString *error)
         hasColumn(QStringLiteral("exp_game"), QStringLiteral("lang_catalog_mask"));
     // Alias de noms (1.7.0 → 1.8.0). Détecté sur la table, comme les langues.
     m_hasAliases = hasTable(m_db, QStringLiteral("exp_game_alias"));
+    // Identification par nom de fichier (1.9.0). Détecté sur la table, comme les autres.
+    m_hasGameFiles = hasTable(m_db, QStringLiteral("exp_game_file"));
 
     if (m_meta.major != schema::kSupportedMajor) {
         const QString message =
@@ -308,6 +310,78 @@ Game ExportDatabase::readGame(sqlite3_stmt *stmt)
     game.modeMask   = static_cast<quint64>(sqlite3_column_int64(stmt, 8));
     game.langCatalogMask = static_cast<quint64>(sqlite3_column_int64(stmt, 9));
     return game;
+}
+
+std::optional<GameFileMatch> ExportDatabase::findByFileName(const QString &fileKey,
+                                                            const QString &platformKey) const
+{
+    if (!m_db || !m_hasGameFiles)
+        return std::nullopt;
+
+    const QString sql =
+        QStringLiteral("SELECT g.title, f.game_key, f.collection "
+                       "FROM exp_game_file f JOIN exp_game g ON g.game_key = f.game_key "
+                       "WHERE f.file_key = ? AND f.%1 = ?")
+            .arg(platformColumn());
+
+    sqlite3_stmt *stmt = prepare(m_db, sql);
+    if (!stmt)
+        return std::nullopt;
+
+    // Minuscules et rien d'autre : c'est la règle convenue avec le backend, et c'est
+    // exactement ce que le scanner calcule. Toute normalisation supplémentaire d'un seul
+    // côté ferait échouer le lookup SANS erreur.
+    bindText(stmt, 1, fileKey.toLower());
+    bindText(stmt, 2, platformKey);
+
+    std::optional<GameFileMatch> result;
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        GameFileMatch match;
+        match.title      = columnText(stmt, 0);
+        match.gameKey    = columnText(stmt, 1);
+        match.collection = columnText(stmt, 2);
+        result           = match;
+    }
+    sqlite3_finalize(stmt);
+    return result;
+}
+
+QList<QPair<QString, QString>>
+ExportDatabase::gameFilesForGame(const QString &gameKey) const
+{
+    QList<QPair<QString, QString>> files;
+    if (!m_db || !m_hasGameFiles)
+        return files;
+
+    const QString sql = QStringLiteral("SELECT file_key, %1 FROM exp_game_file "
+                                       "WHERE game_key = ? ORDER BY file_key")
+                            .arg(platformColumn());
+    sqlite3_stmt *stmt = prepare(m_db, sql);
+    if (!stmt)
+        return files;
+
+    bindText(stmt, 1, gameKey);
+    while (sqlite3_step(stmt) == SQLITE_ROW)
+        files.append({ columnText(stmt, 0), columnText(stmt, 1) });
+    sqlite3_finalize(stmt);
+    return files;
+}
+
+QStringList ExportDatabase::fileNamePlatformKeys() const
+{
+    QStringList keys;
+    if (!m_db || !m_hasGameFiles)
+        return keys;
+
+    const QString sql = QStringLiteral("SELECT DISTINCT %1 FROM exp_game_file ORDER BY %1")
+                            .arg(platformColumn());
+    sqlite3_stmt *stmt = prepare(m_db, sql);
+    if (!stmt)
+        return keys;
+    while (sqlite3_step(stmt) == SQLITE_ROW)
+        keys.append(columnText(stmt, 0));
+    sqlite3_finalize(stmt);
+    return keys;
 }
 
 QList<Game> ExportDatabase::searchByName(const QString &needle, int limit) const

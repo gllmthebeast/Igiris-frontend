@@ -4,7 +4,7 @@
 > **Frontend embarqué** (Batocera / Raspberry Pi en premier, mais pas uniquement — §1).
 > Le backend est un projet **SÉPARÉ** : `/opt/igiris` sur cette même VM, avec son propre
 > `CLAUDE.md`. Ce projet ne démarre vraiment qu'une fois l'export générable de bout en bout
-> — ce qui est le cas aujourd'hui (schéma **1.8.0**, cf. `data/`).
+> — ce qui est le cas aujourd'hui (schéma **1.9.0**, cf. `data/`).
 
 ---
 
@@ -34,7 +34,8 @@ meilleure version** d'après les votes de la communauté et les scores d'émulat
 Techniquement, l'appareil ne fait que deux choses :
 
 1. chercher un jeu par son nom ;
-2. retrouver un jeu depuis un fichier local (par CRC, ou par nom de romset pour l'arcade).
+2. retrouver un jeu depuis un fichier local — par CRC, par nom de romset pour l'arcade, ou
+   par nom de fichier pour ce qui n'a aucune empreinte (§4).
 
 **Il ne fait AUCUN rapprochement de titres.** Tout est précalculé côté serveur : la
 normalisation des noms, le rapprochement avec les dats, l'arbitrage des versions, les
@@ -146,9 +147,9 @@ l'ancien. Un export tronqué ne doit jamais devenir l'export courant.
 
 ---
 
-## 3. Le schéma **réellement livré** — version 1.8.0
+## 3. Le schéma **réellement livré** — version 1.9.0
 
-⚠️ Schéma vérifié dans `data/games.db` au 2026-08-17, APRÈS l'élargissement du catalogue
+⚠️ Schéma vérifié dans `data/games.db` au 2026-08-18, APRÈS l'élargissement du catalogue
 (§3.1). Pour ce qui est *demandé* au backend mais **pas encore livré** (`platform_key`),
 voir §9 — et ne pas coder contre ces champs avant qu'ils existent.
 
@@ -278,6 +279,30 @@ exp_game_alias(game_key, alias_key, alias_name)
     -- Départage des collisions de clé : le nom le plus COURT, puis l'ordre alphabétique.
     -- Sans règle, le survivant dépendait de l'ordre d'insertion, donc changeait d'un
     -- export à l'autre sans raison.
+
+-- ------------------------- ajouts du 1.9.0 : identifier ce qui n'a AUCUNE empreinte
+
+exp_game_file(file_key, batocera_system, game_key, collection)
+    -- PRIMARY KEY (file_key, batocera_system), WITHOUT ROWID. 766 lignes, 722 jeux, `dos`.
+    --
+    -- TROISIÈME et dernière voie d'identification. Elle existe parce que des collections
+    -- entières n'ont aucun hash : eXoDOS et eXoWin3x ne se distribuent que par TORRENT, et
+    -- un torrent ne hache pas les fichiers — il ne hache que des pièces de 8 Mo, à cheval
+    -- sur plusieurs entrées. Ce n'est pas une lacune de la source, c'est le format.
+    --
+    -- file_key : nom SANS sa dernière extension, en minuscules, ET RIEN D'AUTRE — soit
+    --   exactement QFileInfo::completeBaseName().toLower(). Le backend avait proposé de
+    --   replier aussi les espaces ; refusé, parce qu'une normalisation appliquée d'un seul
+    --   côté fait échouer le lookup SANS erreur. L'ANNÉE est conservée : elle désambiguïse
+    --   les rééditions, et une identification fausse est pire qu'une absence (§11).
+    --
+    -- ⚠ Table DÉDIÉE, et surtout pas des lignes de plus dans exp_romset. Mesuré : y verser
+    --   les jeux DOS aurait fait passer le filtre « Type : arcade » de 833 à 1 536 jeux,
+    --   parce qu'arcadePlatformKeys() alimente AUSSI isArcade en vue liste. 703 jeux DOS
+    --   sous un filtre « arcade », sans erreur ni message.
+    --
+    -- Collisions de file_key : ÉCARTÉES à l'export (4 cas), sur notre demande — même
+    -- raisonnement que les CRC ambigus du §11.
 ```
 
 ### 3.1 — L'élargissement du 1.7.0, et ce qu'il exerce
@@ -334,7 +359,7 @@ est respecté, à lancer avant toute autre chose.
 
 ## 4. Identification des ROMs locales
 
-### Deux voies, et pourquoi
+### Trois voies, et pourquoi
 
 **Consoles → par CRC32.** Le fichier est hashé, on cherche dans `exp_rom_hash`.
 
@@ -369,6 +394,30 @@ circulation en ont souvent un. Hasher le fichier brut fait **tout tomber en roug
 > l'heuristique usuelle est `taille_fichier % 1024 == 512` → ignorer les 512 premiers
 > octets et réessayer le lookup — ou à demander au backend (§9). Ne pas supposer que
 > `header_skip = 0` veut dire « fichier propre ».
+
+**DOS et Windows 3.x → par NOM DE FICHIER** (export 1.9.0), et pour une raison encore plus
+radicale que l'arcade : **il n'existe aucune empreinte**. eXoDOS et eXoWin3x ne se
+distribuent que par torrent, et un torrent ne hache pas les fichiers. Le nom, lui, est exact
+et vient de la source officielle.
+
+La clé est `QFileInfo::completeBaseName().toLower()`, **et rien d'autre** — la même que
+l'arcade, et exactement celle que le backend applique pour produire `file_key`.
+
+> ⚠️ **Deux listes de plateformes, à ne jamais confondre.** `arcadePlatformKeys()` sert au
+> scanner **et** à `isArcade` en vue liste ; `fileNamePlatformKeys()` ne sort **jamais** du
+> scanner. C'est ce qui empêche les jeux DOS de remonter sous le filtre « Type : arcade ».
+
+### Précédence : le CRC l'emporte, toujours
+
+Une plateforme peut relever de **deux** voies. C'est le cas de `dos` : 678 jeux par CRC,
+~700 de plus par nom. La règle n'est donc pas théorique, elle s'applique tous les jours.
+
+> Le CRC identifie un **contenu**. Le nom identifie un **contenant** que n'importe qui peut
+> renommer. Quand les deux répondent et se contredisent, c'est le nom qui a tort.
+
+Le nom n'est donc essayé qu'**après** l'échec du CRC — y compris quand l'archive est
+illisible, cas où le nom reste le seul point d'appui. Un test verrouille cette précédence :
+sans lui, elle pourrait s'inverser un jour sans que rien ne le signale.
 
 **Archives.** Beaucoup de ROMs sont zippées : **hasher le contenu, pas le zip.** (Sauf
 arcade, qui ne se hashe pas du tout — voir plus haut.)

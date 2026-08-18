@@ -53,6 +53,7 @@ RomScanner::RomScanner(const catalog::ExportDatabase &db, ScanCache *cache)
     : m_db(db)
     , m_cache(cache)
     , m_arcadeKeys(db.arcadePlatformKeys())
+    , m_fileNameKeys(db.fileNamePlatformKeys())
     , m_headerSkips(db.headerSkipByPlatform())
 {
 }
@@ -119,6 +120,34 @@ void RomScanner::identifyArcade(const QString &path, const ScanTarget &target,
     rom.romset      = romset;
     rom.kind        = MatchKind::Romset;
     report.identified.append(rom);
+}
+
+bool RomScanner::identifyByFileName(const QString &path, const ScanTarget &target,
+                                    ScanReport &report)
+{
+    if (!m_fileNameKeys.contains(target.platformKey))
+        return false;
+
+    // EXACTEMENT la même règle que pour l'arcade, et exactement celle que le backend
+    // applique pour produire file_key : dernière extension retirée, minuscules, rien
+    // d'autre. Il avait proposé de replier aussi les espaces — refusé, parce qu'une
+    // normalisation appliquée d'un seul côté fait échouer le lookup SANS erreur.
+    const QString fileKey = QFileInfo(path).completeBaseName().toLower();
+
+    const auto match = m_db.findByFileName(fileKey, target.platformKey);
+    if (!match)
+        return false;
+
+    IdentifiedRom rom;
+    rom.path        = path;
+    rom.platformKey = target.platformKey;
+    rom.gameKey     = match->gameKey;
+    rom.title       = match->title;
+    rom.fileKey     = fileKey;
+    rom.collection  = match->collection;
+    rom.kind        = MatchKind::FileName;
+    report.identified.append(rom);
+    return true;
 }
 
 QString RomScanner::cachedOrComputedCrc(const QString &path, ScanReport &report)
@@ -199,6 +228,16 @@ void RomScanner::identifyFile(const QString &path, const ScanTarget &target,
         }
     }
 
+    // Le CRC n'a rien donné. Reste la troisième voie (export 1.9.0) : le NOM du fichier,
+    // pour les plateformes dont les jeux n'ont aucune empreinte.
+    //
+    // Essayée APRÈS et jamais À LA PLACE : le CRC identifie un contenu, le nom identifie un
+    // contenant que n'importe qui peut renommer. Quand les deux répondent, c'est le nom qui
+    // a tort — c'est la précédence qu'on a défendue au backend, et elle s'applique pour de
+    // vrai sur `dos`, qui relève des deux voies.
+    if (identifyByFileName(path, target, report))
+        return;
+
     report.unidentified.append(path);
 }
 
@@ -208,6 +247,15 @@ void RomScanner::identifyArchive(const QString &path, const ScanTarget &target,
     QString          error;
     const auto       entries = readZipEntries(path, &error);
     if (entries.isEmpty()) {
+        // Archive illisible ou vide. Sur une plateforme identifiée par NOM, ce n'est pas
+        // une impasse : le nom du fichier suffit, et c'est même le seul point d'appui pour
+        // une collection distribuée sans aucune empreinte.
+        //
+        // Sans cette tentative, un zip corrompu ou d'un format inattendu resterait
+        // définitivement inconnu, alors que son nom l'identifie sans ambiguïté.
+        if (identifyByFileName(path, target, report))
+            return;
+
         if (!error.isEmpty())
             report.errors.append(error);
         else
@@ -262,6 +310,16 @@ void RomScanner::identifyArchive(const QString &path, const ScanTarget &target,
             }
         }
     }
+
+    // Le CRC n'a rien donné. Reste la troisième voie (export 1.9.0) : le NOM du fichier,
+    // pour les plateformes dont les jeux n'ont aucune empreinte.
+    //
+    // Essayée APRÈS et jamais À LA PLACE : le CRC identifie un contenu, le nom identifie un
+    // contenant que n'importe qui peut renommer. Quand les deux répondent, c'est le nom qui
+    // a tort — c'est la précédence qu'on a défendue au backend, et elle s'applique pour de
+    // vrai sur `dos`, qui relève des deux voies.
+    if (identifyByFileName(path, target, report))
+        return;
 
     report.unidentified.append(path);
 }

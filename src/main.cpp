@@ -459,6 +459,71 @@ int runExportCommand(const QString &path)
                              "peuvent rien changer, et s'afficheraient comme une redite\n",
                              redondants);
         }
+
+        // --- [9] identification par nom de fichier (1.9.0) --------------------------------
+        std::printf("\n[9] identification par nom de fichier\n");
+        if (!db.hasGameFiles()) {
+            std::printf("    absente de cet export — CRC et romsets seulement\n");
+        } else {
+            const auto keys = db.fileNamePlatformKeys();
+            std::printf("    plateformes concernées : %s\n",
+                        qPrintable(keys.join(QStringLiteral(", "))));
+
+            // ALLER-RETOUR RÉEL : on repart des lignes de l'export et on les relit par
+            // findByFileName(), c'est-à-dire par le chemin exact que suivra le scanner.
+            //
+            // C'est le seul contrôle qui attrape une divergence de normalisation entre
+            // l'export et l'appareil — la seule chose, ici, qui puisse casser en silence.
+            int lignes = 0, verifies = 0, divergents = 0, malFormees = 0, orphelins = 0;
+            for (const auto &game : db.allGames()) {
+                for (const auto &file : db.gameFilesForGame(game.gameKey)) {
+                    ++lignes;
+                    const QString &fileKey    = file.first;
+                    const QString &platformKey = file.second;
+
+                    // La clé doit avoir la forme que le scanner calcule :
+                    // completeBaseName().toLower(), et rien d'autre.
+                    if (fileKey != fileKey.toLower() || fileKey.trimmed() != fileKey
+                        || fileKey.isEmpty())
+                        ++malFormees;
+
+                    if (verifies >= 200)
+                        continue; // échantillon : 200 aller-retours suffisent à trancher
+                    ++verifies;
+                    const auto found = db.findByFileName(fileKey, platformKey);
+                    if (!found)
+                        ++orphelins;
+                    else if (found->gameKey != game.gameKey)
+                        ++divergents;
+                }
+            }
+
+            std::printf("    %d lignes · aller-retour : %d/%d cohérents\n", lignes,
+                        verifies - divergents - orphelins, verifies);
+
+            if (malFormees > 0 || divergents > 0 || orphelins > 0) {
+                // Chacun de ces trois cas casse l'identification SANS lever d'erreur : une
+                // clé mal formée ne peut jamais mordre, et un aller-retour qui ne revient
+                // pas au même jeu veut dire que l'export et l'appareil ne parlent pas la
+                // même langue.
+                std::fprintf(stderr,
+                             "✗ noms de fichiers : %d clés mal formées · %d aller-retours "
+                             "divergents · %d introuvables\n",
+                             malFormees, divergents, orphelins);
+                return 1;
+            }
+
+            // Une plateforme peut relever des DEUX voies — c'est ce qui rend la règle de
+            // précédence load-bearing et non théorique.
+            QStringList lesDeux;
+            for (const QString &key : keys) {
+                if (!db.arcadePlatformKeys().contains(key))
+                    lesDeux.append(key);
+            }
+            std::printf("    CRC ET nom sur : %s  (le CRC l'emporte)\n",
+                        lesDeux.isEmpty() ? "(aucune)"
+                                          : qPrintable(lesDeux.join(QStringLiteral(", "))));
+        }
         if (scoreSurNonEmulable > 0) {
             // emu_score est un taux de fidélité d'ÉMULATION : sur une plateforme qu'on
             // n'émule pas, TOUTE valeur est un mensonge, y compris 0.
